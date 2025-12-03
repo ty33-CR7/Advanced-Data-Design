@@ -1,0 +1,46 @@
+{
+  "dataset": "CIFAR-10",
+  "total_items": 60000,
+  "train_items": 50000,
+  "test_items": 10000,
+  "class_names": [
+    "airplane",
+    "automobile",
+    "bird",
+    "cat",
+    "deer",
+    "dog",
+    "frog",
+    "horse",
+    "ship",
+    "truck"
+  ],
+  "labels_distribution_full": {
+    "0": 6000,
+    "1": 6000,
+    "2": 6000,
+    "3": 6000,
+    "4": 6000,
+    "5": 6000,
+    "6": 6000,
+    "7": 6000,
+    "8": 6000,
+    "9": 6000
+  },
+  "k_folds": 10,
+  "seed": 42,
+  "shuffle": true,
+  "index_order_note": "Indices are for concatenated dataset [train(50k) then test(10k)].",
+  "files": [
+    "fold_1.npy",
+    "fold_2.npy",
+    "fold_3.npy",
+    "fold_4.npy",
+    "fold_5.npy",
+    "fold_6.npy",
+    "fold_7.npy",
+    "fold_8.npy",
+    "fold_9.npy",
+    "fold_10.npy"
+  ]
+}
