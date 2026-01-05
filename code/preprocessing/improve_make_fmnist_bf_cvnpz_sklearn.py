@@ -14,7 +14,7 @@ import tensorflow as tf
 from itertools import repeat
 import os
 from functools import lru_cache
-
+from preprocessing_CWALDP import exe_discretize,exe_merge
 def compute_lk(fp, m):
     from math import log, ceil
     l = ceil(-(m * log(fp)) / (log(2) ** 2))
@@ -34,26 +34,31 @@ def random_hash_positions(token: str, k: int, l: int):
 
 # --- 近傍生成：引数が同じなら結果同一 → LRUで強力にキャッシュ
 @lru_cache(maxsize=1_000_003)
-def _make_neighbors_cached(x: int, n: int, lo: int, hi: int):
+def _make_neighbors_cached(x: int, n: int, lo: int):
     # あなたの式そのまま（typoだけ arange に直す）
     # np.arange は浮動小数の端数で最終点が落ちやすいので +1e-12 で保険
-    arr = np.arange(x - n, x + n + 1e-12, 1)
+    if lo==0:
+        diff=1
+    else:
+        diff=2*lo
+    arr = [x+diff*i for i in range(-n,n+1)]
     # 返り値の型はそのまま list に（token生成時に str() されます）
-    return tuple(arr.tolist())
+    return tuple(arr)
 
-def make_neighbors(x: int, n: int, lo: int = 0, hi: int = 255):
+def make_neighbors(x: int, n: int, lo: int = 0):
     # ラッパー（互換のために残す）
-    return list(_make_neighbors_cached(int(x), int(n), int(lo), int(hi)))
+    return list(_make_neighbors_cached(int(x), int(n), int(lo)))
 
 def encode_sample(flat_img: np.ndarray, n: int, k: int, l: int, noise_p: float = 0.0):
     # 途中はboolで軽く、最後にpackbits
     bf = np.zeros(l, dtype=np.bool_)
     pos_list = []
+    low_val=np.min(flat_img)
 
     # 1) すべてのインデックスを先に集める（Pythonの代入回数を激減）
     for idx, val in enumerate(flat_img):
         # 近傍はキャッシュ済み（同一xならゼロコスト）
-        for v in make_neighbors(int(val), n, 0, 255):
+        for v in make_neighbors(int(val), n, low_val):
             token = f"{v}#{idx}"
             pos_list.append(random_hash_positions(token, k, l))
 
@@ -98,12 +103,16 @@ def main():
     ap.add_argument("--neighbors", type=int, required=True)
     ap.add_argument("--noise_p", type=float, default=0.0, help="ノイズ反転確率 (0.0〜1.0)")
     ap.add_argument("--hash_number",type=int,default=None)#指定しない場合は、最適値がFPから計算される
+    ap.add_argument("--PI",type=float)
+    ap.add_argument("--L",type=int)
     ap.add_argument("--splits", type=int, default=10)
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--out", type=str, default=None)
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
+    PI=args.PI
+    L=args.L
 
     start_time = time.time()
     # --- データ読込 ---
@@ -112,9 +121,18 @@ def main():
     # --- train/test を結合 ---
     x_all = np.concatenate([x_tr, x_te], axis=0)
     y_all = np.concatenate([y_tr, y_te], axis=0)
+    x_all=x_all.reshape(len(x_all), -1).astype(np.uint8)
 
     # --- flatten（28×28→784次元）＋型変換 ---
-    X = x_all.reshape(len(x_all), -1).astype(np.uint8)
+    if PI == 0.25:
+        X_merged = exe_merge(x_all)
+        X_merged = exe_merge(X_merged)
+    elif PI==0.5:
+        X_merged = exe_merge(x_all)
+    elif PI==1:
+        X_merged= x_all
+        
+    X = exe_discretize(X_merged, L)
     y = y_all.astype(np.int64)
     
     #784×(2*近傍数＋1)
@@ -122,11 +140,9 @@ def main():
     l, k = compute_lk(args.fp, m)
     if args.hash_number!=None:
         k=args.hash_number
-    print(f"[INFO] fp={args.fp}, n={args.neighbors}, l={l}, k={k}, noise_p={args.noise_p},hash_number={k}")
+    print(f"[INFO] fp={args.fp}, n={args.neighbors}, l={l}, noise_p={args.noise_p},hash_number={k},PI={PI},L={L}")
     #a=encode_sample(X[0], args.neighbors, k, l, args.noise_p)
     X_bits = run_parallel(X, args, k, l)
-
-
     meta = dict(fp=args.fp, neighbors=args.neighbors, noise_p=args.noise_p, l=l, k=k, splits=args.splits)
     suffix = f"_NOISE{args.noise_p}" if args.noise_p > 0 else "_NOISE0"
     out_name = args.out or f"./data/FashionMNIST/BF/imporve_fmnist_bf_cv{args.splits}_fp{args.fp}_n{args.neighbors}{suffix}_k{k}.npz"
