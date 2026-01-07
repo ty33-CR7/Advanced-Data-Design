@@ -8,6 +8,20 @@ import sklearn
 import json
 import math
 import tensorflow as tf
+import gc # ファイル冒頭に追加
+
+# --- モデルサマリーを取得するヘルパー関数 (新規追加) ---
+def _get_model_summary_string(model):
+    """
+    Kerasモデルのsummary()出力を文字列として取得する
+    """
+    stringlist = []
+    # model.summary()が実行可能であることを確認するために compile() を先に実行
+    # train_model内でcompileしているため、厳密には不要だが安全のために残す
+    # ただし、ここではモデル構築"後"に実行する前提なので、引数で渡されたモデルに対して実行する。
+    model.summary(print_fn=lambda x: stringlist.append(x))
+    return "\n".join(stringlist)
+
 
 def generate_laplace(df, pixels=784, tones=256, epsilon=100, seed=12345):
     np.random.seed(seed)
@@ -224,17 +238,45 @@ def create_cluster(P, cluster_num):
                 cluster2.append((i, 1))
             for i in range(1, 7):
                 cluster2.append((i, 6))
-
             clusters = [flat(cluster1, P), flat(cluster2, P)]
-
             for i in range(1, 7):
                 cluster = []
                 for j in range(2, 6):
                     cluster.append((i, j))
                 clusters.append(flat(cluster, P))
+            return clusters
+    elif P==16*16:
+        if cluster_num == 10:
+            # making clusters (ilustrated in PowerPoint p.19)
+            cluster1 = [] # cluster1 : surrounding area
+            for i in range(16):
+                for j in range(16):
+                    idx_tuple = (i,j)
+                    cluster1.append(idx_tuple)
+            for i in range(2, 14):
+                for j in range(2,14):
+                    cluster1.remove((i,j))       
+            cluster2 = [] # cluster2 : side area1
+            for i in range(2,14):
+                for j in range(2,4):
+                    cluster2.append((i,j)) 
+                for j in range(12,14):
+                    cluster2.append((i,j)) 
+            clusters = [flat(cluster1, P), flat(cluster2, P)]
+            cluster4 = [] # center area1
+            for i in range(2,14,2):
+                for j in range(4, 12):
+                    cluster4.append((i,j))
+            clusters.append(flat(cluster4, P))
+            for i in range(3,15,2):
+                cluster = [] # center area2
+                for j in range(4,12):
+                    cluster.append((i,j))
+                clusters.append(flat(cluster, P))
 
             return clusters
-        
+    else:
+            raise ValueError("クラスタリングが定義されていません")
         
 
 
@@ -249,10 +291,18 @@ def flat(idx_tuple_list, P):
         for item in idx_tuple_list:
             flat_idx_list.append(item[0]*7 + item[1])
         return flat_idx_list
+    elif P==8*8:
+        for item in idx_tuple_list:
+            flat_idx_list.append(item[0]*8 + item[1])
+        return flat_idx_list
+    elif P==16*16:
+        for item in idx_tuple_list:
+            flat_idx_list.append(item[0]*16 + item[1])
+        return flat_idx_list
 
-def train_CIFAR10(X_train_noise,X_test_noise,y_train_reshaped,y_test):
+
+def train_model(X_train_noise,X_test_noise,X_test,y_train_reshaped,y_test,model_selection):
         # データの全長 (BFの長さ) を取得
-        # 例: n_features が 784 の場合
         edge_size=int(math.sqrt(X_train_noise.shape[1]))
         H, W = edge_size,edge_size
         C = 1 # チャンネル数 (BFはグレースケールとして扱うため 1)
@@ -260,71 +310,198 @@ def train_CIFAR10(X_train_noise,X_test_noise,y_train_reshaped,y_test):
         # 1. 2次元CNNが期待する4次元形状 (N, H, W, C) にリシェイプ
         X_train_noise_reshaped = X_train_noise.reshape(-1, H, W, C)
         X_test_noise_reshaped = X_test_noise.reshape(-1, H, W, C)
+        X_test_reshaped=X_test.reshape(-1,H,W,C)
 
         # 2. Conv2D層の入力形状 (バッチサイズを除く3次元)
         input_shape = (H, W, C)
         # --------------------------
         # 1D CNNモデルの定義
         # --------------------------
-        model = tf.keras.models.Sequential([
-            # ----------------------------------------
-            # 1. 第1畳み込みブロック
-            # ----------------------------------------
-            tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape),
-            tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-            tf.keras.layers.Dropout(0.5),
+        if model_selection == "model2":
+            model = tf.keras.models.Sequential([
+                # ----------------------------------------
+                # 1. 第1畳み込みブロック
+                # ----------------------------------------
+                tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape),
+                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+                tf.keras.layers.Dropout(0.5),
+                
+                # ----------------------------------------
+                    # 2. 第2畳み込みブロック
+                # ----------------------------------------
+                tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
+                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+                tf.keras.layers.MaxPooling2D((2, 2)),
+                tf.keras.layers.Dropout(0.5),
+
+                # ----------------------------------------
+                # 3. 全結合層への準備
+                # ----------------------------------------
+                tf.keras.layers.Flatten(), # 2Dテンソルを1Dベクトルに変換
+
+                # ----------------------------------------
+                # 4. 第1全結合層 (Dense)
+                # ----------------------------------------
+                tf.keras.layers.Dense(100, activation='relu'),
+                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+                tf.keras.layers.Dropout(0.5),
+
+                # ----------------------------------------
+                # 5. 出力層 (Dense)
+                # ----------------------------------------
+                tf.keras.layers.Dense(10, activation='softmax') # クラス分類数が10と仮定
+            ])
+        elif model_selection=="model1":
+                model = tf.keras.models.Sequential([
+                # ----------------------------------------
+                # 1. 第1畳み込みブロック
+                # ----------------------------------------
+                tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape),
+                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+                tf.keras.layers.Dropout(0.5),
+                
+                # ----------------------------------------
+                    # 2. 第2畳み込みブロック
+                # ----------------------------------------
+                tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
+                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+                tf.keras.layers.Dropout(0.5),
+
+                # ----------------------------------------
+                # 3. 全結合層への準備
+                # ----------------------------------------
+                tf.keras.layers.Flatten(), # 2Dテンソルを1Dベクトルに変換
+
+                # ----------------------------------------
+                # 4. 第1全結合層 (Dense)
+                # ----------------------------------------
+                tf.keras.layers.Dense(100, activation='relu'),
+                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+                tf.keras.layers.Dropout(0.5),
+
+                # ----------------------------------------
+                # 5. 出力層 (Dense)
+                # ----------------------------------------
+                tf.keras.layers.Dense(10, activation='softmax') # クラス分類数が10と仮定
+            ])
+        elif model_selection=="model3":
+                model = tf.keras.models.Sequential([
+                # ----------------------------------------
+                # 1. 第1畳み込みブロック
+                # ----------------------------------------
+                tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape),
+                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+                tf.keras.layers.Dropout(0.5),
             
-            # ----------------------------------------
-            # 2. 第2畳み込みブロック
-            # ----------------------------------------
-            tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
-            tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-            tf.keras.layers.MaxPooling2D((2, 2)),
-            tf.keras.layers.Dropout(0.5),
+                # 3. 全結合層への準備
+                # ----------------------------------------
+                tf.keras.layers.Flatten(), # 2Dテンソルを1Dベクトルに変換
 
-            # ----------------------------------------
-            # 3. 全結合層への準備
-            # ----------------------------------------
-            tf.keras.layers.Flatten(), # 2Dテンソルを1Dベクトルに変換
+                # ----------------------------------------
+                # 4. 第1全結合層 (Dense)
+                # ----------------------------------------
+                tf.keras.layers.Dense(100, activation='relu'),
+                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+                tf.keras.layers.Dropout(0.5),
 
-            # ----------------------------------------
-            # 4. 第1全結合層 (Dense)
-            # ----------------------------------------
-            tf.keras.layers.Dense(100, activation='relu'),
-            tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-            tf.keras.layers.Dropout(0.5),
+                # ----------------------------------------
+                # 5. 出力層 (Dense)
+                # ----------------------------------------
+                tf.keras.layers.Dense(10, activation='softmax') # クラス分類数が10と仮定
+            ])
+        elif   model_selection == "model4":
+                model = tf.keras.models.Sequential([
+                # ========================================
+                # 1. 第1畳み込みブロック
+                # ========================================
+                tf.keras.layers.Conv2D(32, (3, 3), padding="same",
+                                    activation='relu', input_shape=input_shape),
+                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+                tf.keras.layers.Conv2D(32, (3, 3), padding="same", activation='relu'),
+                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+                tf.keras.layers.MaxPooling2D((2, 2)),
+                tf.keras.layers.Dropout(0.3),
 
-            # ----------------------------------------
-            # 5. 出力層 (Dense)
-            # ----------------------------------------
-            tf.keras.layers.Dense(10, activation='softmax') # クラス分類数が10と仮定
-        ])
+                # ========================================
+                # 2. 第2畳み込みブロック
+                # ========================================
+                tf.keras.layers.Conv2D(64, (3, 3), padding="same", activation='relu'),
+                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+                tf.keras.layers.Conv2D(64, (3, 3), padding="same", activation='relu'),
+                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+                tf.keras.layers.MaxPooling2D((2, 2)),
+                tf.keras.layers.Dropout(0.4),
+
+                # ========================================
+                # 3. 第3畳み込みブロック
+                # ========================================
+                tf.keras.layers.Conv2D(128, (3, 3), padding="same", activation='relu'),
+                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+                tf.keras.layers.Conv2D(128, (3, 3), padding="same", activation='relu'),
+                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+                tf.keras.layers.MaxPooling2D((2, 2)),
+                tf.keras.layers.Dropout(0.5),
+
+                # ========================================
+                # 4. 全結合層への準備
+                # ========================================
+                tf.keras.layers.Flatten(),
+
+                # ========================================
+                # 5. 全結合層
+                # ========================================
+                tf.keras.layers.Dense(256, activation='relu'),
+                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+                tf.keras.layers.Dropout(0.5),
+
+                tf.keras.layers.Dense(100, activation='relu'),
+                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+                tf.keras.layers.Dropout(0.5),
+
+                # ========================================
+                # 6. 出力層
+                # ========================================
+                tf.keras.layers.Dense(10, activation='softmax')
+            ])
+
+        #tf.keras.layers.MaxPooling2D((2, 2)),
 
         # --------------------------
         # コンパイル
         # --------------------------
         model.compile( optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3), loss="sparse_categorical_crossentropy", metrics=["accuracy"] )
         # -------------------------- # コールバック設定 # -------------------------- 
-        early_stop = tf.keras.callbacks.EarlyStopping( monitor="val_loss", patience=5, restore_best_weights=True ) 
+
         def scheduler(epoch, lr): 
-            if epoch > 10: return lr * 0.5 
+            if epoch > 50: return lr * 0.5 
             return lr 
         lr_schedule = tf.keras.callbacks.LearningRateScheduler(scheduler) 
         # -------------------------- # 学習 # -------------------------- 
         history = model.fit( X_train_noise_reshaped, y_train_reshaped, # 変数名を調整 
                             validation_split=0.2, 
-                            epochs=10, 
+                            epochs=30, 
                             batch_size=256, 
-                            callbacks=[early_stop, lr_schedule], 
-                            verbose=0 # 訓練中の出力を抑制し、最後にまとめて計測する場合 
+                            callbacks=[lr_schedule], 
+                            verbose=1 # 訓練中の出力を抑制し、最後にまとめて計測する場合 
                             )
+        train_loss = history.history['loss'][-1]
+        train_acc = history.history['accuracy'][-1]
+        # model.summary()が実行可能であることを確認
+        stringlist = []
+        # ★ 修正箇所: line_break=Falseなどの追加引数を吸収するため、**kwargs を追加
+        model.summary(print_fn=lambda x, **kwargs: stringlist.append(x))
+        model_summary = "\n".join(stringlist)
         # --------------------------
         # テスト評価 (推論と精度の計算)
         # --------------------------
         # model.evaluateは推論と同時に損失と精度を計算する
-        test_loss, test_acc = model.evaluate(X_test_noise_reshaped, y_test, verbose=0) # 変数名を調整
-        return test_loss,test_acc
-            
+        test_noise_loss, test_noise_acc = model.evaluate(X_test_noise_reshaped, y_test, verbose=0) # 変数名を調整
+        test_loss, test_acc = model.evaluate(X_test_reshaped, y_test, verbose=0) # 変数名を調整
+        # --- 【ここを追加】メモリ解放処理 ---
+        del model       # Pythonのオブジェクトを削除
+        tf.keras.backend.clear_session()  # TensorFlowのバックエンドメモリを解放
+        gc.collect()    # Pythonのガベージコレクションを強制実行
+        return test_loss,test_acc,test_noise_loss,test_noise_acc, train_loss, train_acc,model_summary
             
 
 def output_result(data, filename):
@@ -361,51 +538,83 @@ def _collect_env_metadata():
 
 import os, csv
 
-def output_time_result(records, filename):
+import os
+import csv
+
+def output_time_result(records, filename, model_summary=""):
     """
     Write timing measurement records to CSV.
-    Each record must contain keys:
-      P, L, epsilon, seed, fold, test_env, time_sec, accuracy
-    Writes environment metadata as commented header lines when creating new file.
+    Each record contains keys matching the new dictionary structure:
+      P, L, epsilon, seed, fold, time_sec,
+      test_loss, test_noise_loss, train_loss,
+      test_accuracy, test_noise_accuracy, train_accuracy
     """
     file_exists = os.path.exists(filename)
     write_header = not file_exists
 
     with open(filename, mode="a", encoding="utf-8", newline="") as f:
-        if write_header:
-            meta = _collect_env_metadata()
-            for k, v in meta.items():
-                f.write(f"# {k}: {v}\n")
+            if write_header:
+                # 環境メタデータの書き込み（必要であれば関数を呼び出す）
+                # meta = _collect_env_metadata()
+                # for k, v in meta.items():
+                #     f.write(f"# {k}: {v}\n")
+                
+                # --- モデルの概要をコメントとして追加 ---
+                if model_summary:
+                    f.write("# Model Summary:\n")
+                    for line in model_summary.splitlines():
+                        f.write(f"# {line}\n")
+                # ----------------------------------------
 
-        writer = csv.writer(f)
-        if write_header:
-            writer.writerow([
-                "P", "L", "epsilon", "seed", "fold",
-                "test_env", "time_sec", "accuracy"
-            ])
+            writer = csv.writer(f)
+            
+            # ★ 修正: ヘッダーを新しい辞書のキーに合わせて更新
+            if write_header:
+                writer.writerow([
+                    "P", "L", "epsilon", "seed", "fold",
+                    "time_sec",
+                    "test_loss", "test_noise_loss", "train_loss",
+                    "test_accuracy", "test_noise_accuracy", "train_accuracy"
+                ])
 
-        for r in records:
-            writer.writerow([
-                r.get('P'),
-                r.get('L'),
-                r.get('epsilon'),
-                r.get('seed'),
-                r.get('fold'),
-                r.get('test_env', ''),     # default空文字（互換性のため）
-                f"{r.get('time_sec', 0):.9f}",
-                f"{r.get('accuracy', 0):.4f}"
-            ])
+            for r in records:
+                # ★ 修正: 新しい辞書のキーに合わせて値を取り出し
+                writer.writerow([
+                    r.get('P'),
+                    r.get('L'),
+                    r.get('epsilon'),
+                    r.get('seed'),
+                    r.get('fold'),
+                    f"{r.get('time_sec', 0):.9f}",
+                    # Loss関係
+                    f"{r.get('test_loss', 0):.4f}",
+                    f"{r.get('test_noise_loss', 0):.4f}",
+                    f"{r.get('train_loss', 0):.4f}",
+                    # Accuracy関係
+                    f"{r.get('test_accuracy', 0):.4f}",
+                    f"{r.get('test_noise_accuracy', 0):.4f}",
+                    f"{r.get('train_accuracy', 0):.4f}"
+                ])
 
     print(f"Add timing results to CSV file {filename} (rows added: {len(records)})")
 
-    
+
+# def load_config(config_path):
+#     with open(config_path, 'r') as f:
+#         config = yaml.safe_load(f)
+
+#     # DATA_ROOTなどの変数展開（あれば）
+#     # シンプルなパス設定なら不要な場合が多い
+
+#     return config
+
 import os, time, numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 
 
 
-def waldp_time(original_path, output_path, epsilon, pixel, L,cluster_num, test_env, seeds,label_epsilon,data):
+def waldp_time(original_path, output_path, epsilon, pixel, L,cluster_num,seed,label_epsilon,data,model,IDX_DIR):
     """
     Measure training/inference time of RandomForest on GRR-perturbed WA datasets.
 
@@ -429,13 +638,11 @@ def waldp_time(original_path, output_path, epsilon, pixel, L,cluster_num, test_e
     else:
         print("No GPU devices found. Running on CPU.")
         
-        
-    BASE = os.path.dirname(os.path.abspath(__file__))
-    IDX_DIR = os.path.join(BASE, f"{data}/split_indices_full_gray")
 
+    
     dat = np.load(original_path, allow_pickle=True)
-    X_all = np.asarray(dat["X_disc"])
-    y_all = np.asarray(dat["y_disc"] if "y_disc" in dat.files else dat["y_all"])
+    X_all = np.asarray(dat["X_disc"]if "X_disc" in dat.files else dat["X_bits"])
+    y_all = np.asarray(dat["y_all"] if "y_all" in dat.files else dat["y"])
 
     if y_all.ndim > 1:
         y_all = y_all.reshape(-1)
@@ -449,6 +656,7 @@ def waldp_time(original_path, output_path, epsilon, pixel, L,cluster_num, test_e
 
     timing_records = []
     preds_bucket = []
+    model_summary_str = ""
     # tone reduction domain (整数リスト)
     L_values = create_L_domain(L)
     one_epsilon = float(epsilon) / (pixel + 1)
@@ -484,27 +692,29 @@ def waldp_time(original_path, output_path, epsilon, pixel, L,cluster_num, test_e
             y_train_noise = grr_array(y_train, label_epsilon, label_domain, seed)
 
             # ---- Test noise (UTS only) ----
-            if test_env.upper() == "UTS":
-                X_test_noised = X_test.copy()
-                for cluster in clusters:
-                    epsilon_for_onepixel = epsilon_for_onecluster/len(cluster)
-                    for j in cluster:
-                        X_test_noised[:, j] = grr_array(X_test[:, j],epsilon_for_onepixel, L_values, seed + 20011 * j)
-            else:
-                X_test_noised = X_test
+
+            X_test_noised = X_test.copy()
+            for cluster in clusters:
+                epsilon_for_onepixel = epsilon_for_onecluster/len(cluster)
+                for j in cluster:
+                    X_test_noised[:, j] = grr_array(X_test[:, j],epsilon_for_onepixel, L_values, seed + 20011 * j)
+
 
             # ---- Train + inference time ----
             ts = time.perf_counter_ns()
             
-            test_loss,test_acc=train_CIFAR10(X_train_noise,X_test_noised,y_train_noise,y_test)
+
+            test_loss,test_acc,test_noise_loss,test_noise_acc, train_loss, train_acc,current_summary = train_model(X_train_noise,X_test_noised,X_test,y_train_noise,y_test,model)
+            # 初回または更新が必要な場合にサマリーを保存
+            if not model_summary_str:
+                 model_summary_str = current_summary
             
             te = time.perf_counter_ns()
 
             elapsed_sec = (te - ts) / 1_000_000_000.0
-            acc = test_acc
 
-            print(f"P:{pixel}, L:{L}, ε:{epsilon}, fold:{fid}, seed:{seed}, "
-                  f"test_env:{test_env}, time(s):{elapsed_sec:.6f}, acc:{acc:.4f}")
+
+            print(f"P:{pixel}, L:{L}, ε:{epsilon}, fold:{fid}, seed:{seed}, time(s):{elapsed_sec:.6f}")
 
             timing_records.append({
                 'P': pixel,
@@ -512,14 +722,19 @@ def waldp_time(original_path, output_path, epsilon, pixel, L,cluster_num, test_e
                 'epsilon': float(epsilon),
                 'seed': int(seed),
                 'fold': int(fid),
-                'test_env': test_env.upper(),
                 'time_sec': float(elapsed_sec),
-                'accuracy': float(acc),
+                'test_loss': float(test_loss),
+                'test_noise_loss': float(test_noise_loss),
+                'train_loss': float(train_loss),
+                'test_accuracy': float(test_acc),
+                'test_noise_accuracy': float(test_noise_acc),
+                'train_accuracy': float(train_acc),
             })
 
 
     # ---- 結果保存 ----
-    output_time_result(timing_records, output_path)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    output_time_result(timing_records, output_path, model_summary_str)
     return timing_records
 
 
@@ -527,19 +742,48 @@ def waldp_time(original_path, output_path, epsilon, pixel, L,cluster_num, test_e
 if __name__ == "__main__":
     data="FashionMNIST"
     seeds = [1, 2, 3]
-    epsilons=[0,1,2,3]
-    params = [(49,4,8,"UTS"),(196,2,10,"UTS")]
-    for P, L,cluster_num,test_env in params:
-        for eps in epsilons:
-            if eps==0:
-                label_epsilon=0
-            else:
-                label_epsilon=2
-            if L==2:
-                input_path = f"../data/{data}/CWALDP/fmnist_full_L2_PI0.5_20251113-134952.npz"
-            elif L==4:
-                input_path = f"../data/{data}/CWALDP/fmnist_full_L4_PI0.25_20251031-173306.npz"
-              
-            output_path = f"../results/{data}/CWALDP/CNN/RR_waldp_L{L}_PI{P}_C{cluster_num}_eps{eps}_env{test_env}_label_noise_{label_epsilon}_time_.csv"
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            waldp_time(input_path, output_path, eps*P*cluster_num/(cluster_num-1), P, L,cluster_num, test_env, seeds,label_epsilon,data)
+    epsilons=[1,2,3]
+    #(14*14,4,10,0),(14*14,4,13,0)(14*14,2,10,2),(14*14,2,13,2),(14*14,2,10,0),(14*14,2,13,0),(14*14,4,10,2),(14*14,4,13,2),
+    params = [(7*7,2,8,0),(7*7,4,8,2),(7*7,4,8,0)]
+    model="model2"
+    for unique_dataset in [True]:
+        for P, L,cluster_num,label_epsilon in params:
+            for eps in epsilons:  
+                if unique_dataset:
+                    if L==2:
+                        if data=="FashionMNIST":
+                            IDX_DIR = os.path.join("../../", f"data/{data}/CWALDP/unique_img/fmnist_full_L2_PI0.5")
+                            input_path = f"../../data/{data}/CWALDP/unique_img/fmnist_full_L2_PI0.5/cleaned_fmnist_L2_PI0.5.npz"
+                        else:
+                            input_path = f"../../data/{data}/CWALDP/cifar_full_L2_PI0.5_20251209-021838.npz"
+                    elif L==4:
+                        if data=="FashionMNIST":
+                            if P==14*14:      
+                                IDX_DIR = os.path.join("../../", f"data/{data}/CWALDP/unique_img/fmnist_full_L4_PI0.5")            
+                                input_path =  f"../../data/{data}/CWALDP/unique_img/fmnist_full_L4_PI0.5/cleaned_fmnist_L4_PI0.5.npz"
+                            elif P==7*7: 
+                                IDX_DIR = os.path.join("../../", f"data/{data}/CWALDP/unique_img/fmnist_full_L4_PI0.25")
+                                input_path =  f"../../data/{data}/CWALDP/unique_img/fmnist_full_L4_PI0.25/cleaned_fmnist_L4_PI0.25.npz"
+                        else:
+                            input_path = f"../../data/{data}/CWALDP/cifar_full_L4_PI0.25_20251028-173658.npz"
+                    
+                else:      
+                    IDX_DIR = os.path.join("../../", f"split_indices_full_gray/{data}")              
+                    if L==2:
+                        if data=="FashionMNIST":
+                            input_path = f"../../data/{data}/CWALDP/fmnist_full_L2_PI0.5.npz"
+                        else:
+                            input_path = f"../../data/{data}/CWALDP/cifar_full_L2_PI0.5_20251209-021838.npz"
+                    elif L==4:
+                        if data=="FashionMNIST":
+                            if P==14*14:                  
+                                input_path = f"../../data/{data}/CWALDP/fmnist_full_L4_PI0.5.npz" 
+                            elif P==7*7: 
+                                input_path = f"../../data/{data}/CWALDP/fmnist_full_L4_PI0.25.npz"
+                        else:
+                            input_path = f"../../data/{data}/CWALDP/cifar_full_L4_PI0.25_20251028-173658.npz"
+                # 現在日時を取得し、YYYYMMDD-HHMMSS形式の文字列を生成
+                timestamp = datetime.datetime.now().strftime("%Y%m%d")
+                output_path = f"../../experiments/{data}/CWALDP/CNN/{timestamp}/{unique_dataset}_unique_RR_waldp_L{L}_PI{P}_C{cluster_num}_eps{eps}_label_noise_{label_epsilon}_{model}.csv"
+            
+                waldp_time(input_path, output_path, eps*P, P, L,cluster_num, seeds,label_epsilon,data,model,IDX_DIR)
