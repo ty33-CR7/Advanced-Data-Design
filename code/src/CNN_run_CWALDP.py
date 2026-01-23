@@ -654,13 +654,11 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
     #画素数の計算
     pixel=int(X_all.shape[1])
     epsilon=pixel*epsilon_per_pixel
-    # tone reduction domain (整数リスト)
-    L_values = create_L_domain(L)
+
 
 
 
     timing_records = []
-    preds_bucket = []
     model_summary_str = ""
     # tone reduction domain (整数リスト)
     L_values = create_L_domain(L)
@@ -670,7 +668,6 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
     epsilon_for_onecluster = epsilon/(cluster_num-1) #ラベルノイズを無視しているため、クラスターが一つ減る。 
 
     timing_records = []
-    preds_bucket = []
     
     for fid in range(1, 11):
         val_idx = np.load(os.path.join(IDX_DIR, f"fold_{fid}.npy"))

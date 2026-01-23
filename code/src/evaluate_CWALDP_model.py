@@ -615,12 +615,11 @@ def plot_learning_curves(history, test_loss, test_acc,test_noise_loss, test_nois
     # ==========================================
     # 2. Accuracy のプロット (右側)
     # ==========================================
-    final_train_acc = acc[-1]
-    final_val_acc = val_acc[-1]
+ 
 
     # Train / Val のライン
-    ax2.plot(epochs, acc, 'bo-', label=f'Train: {final_train_acc:.4f}')
-    ax2.plot(epochs, val_acc, 'r*-', label=f'Val:   {final_val_acc:.4f}')
+    ax2.plot(epochs, acc, 'bo-', label=f'Train: {train_acc:.4f}')
+    ax2.plot(epochs, val_acc, 'r*-', label=f'Val:   {val_acc:.4f}')
     
     # Test のポイント (最終エポックの位置に緑の星)
     ax2.plot(last_epoch, test_acc, 'g*', markersize=15, label=f'Test:  {test_acc:.4f}')
@@ -628,9 +627,9 @@ def plot_learning_curves(history, test_loss, test_acc,test_noise_loss, test_nois
     ax2.plot(last_epoch, train_acc, 'k*', markersize=15, label=f'Train:  {train_acc:.4f}')
 
     # Gapの可視化
-    acc_gap = final_train_acc - final_val_acc 
-    mid_acc = (final_train_acc + final_val_acc) / 2
-    ax2.vlines(last_epoch, final_train_acc, final_val_acc, colors='gray', linestyles='dashed', alpha=0.5)
+    acc_gap = train_acc - val_acc 
+    mid_acc = (train_acc + val_acc) / 2
+    ax2.vlines(last_epoch, train_acc, val_acc, colors='gray', linestyles='dashed', alpha=0.5)
     ax2.annotate(f'Gap: {acc_gap:.4f}', 
                  xy=(last_epoch, mid_acc), 
                  xytext=(last_epoch - 1, mid_acc),
@@ -648,15 +647,15 @@ def plot_learning_curves(history, test_loss, test_acc,test_noise_loss, test_nois
     
     # コンソール出力
     print(f"=== {model_name} Final Metrics ===")
-    print(f"Loss     | Train: {final_train_loss:.4f}, Val: {final_val_loss:.4f}, Test: {test_loss:.4f},Test_noise: {test_noise_loss:.4f}")
-    print(f"Accuracy | Train: {final_train_acc:.4f}, Val: {final_val_acc:.4f}, Test: {test_acc:.4f},Test_noise: {test_noise_acc:.4f}")
+    print(f"Loss     | Train: {train_loss:.4f}, Val: {val_loss:.4f}, Test: {test_loss:.4f},Test_noise: {test_noise_loss:.4f}")
+    print(f"Accuracy | Train: {train_acc:.4f}, Val: {val_acc:.4f}, Test: {test_acc:.4f},Test_noise: {test_noise_acc:.4f}")
     
     plt.savefig(output_path)
     
 
 
 
-def waldp_time(original_path, output_path, epsilon, pixel, L,cluster_num, seed,label_epsilon,model):
+def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num, seed,label_epsilon,model):
     """
     Measure training/inference time of RandomForest on GRR-perturbed WA datasets.
 
@@ -690,26 +689,22 @@ def waldp_time(original_path, output_path, epsilon, pixel, L,cluster_num, seed,l
         y_all = y_all.reshape(-1)
 
     assert X_all.shape[0] == y_all.shape[0], "X と y の件数が一致しません"
-
-    # tone reduction domain (整数リスト)
-    L_values = create_L_domain(L)
-    one_epsilon = float(epsilon) / (pixel + 1)
+    #画素数の計算
+    pixel=int(X_all.shape[1])
+    epsilon=pixel*epsilon_per_pixel
 
 
     timing_records = []
-    preds_bucket = []
     model_summary_str = ""
     # tone reduction domain (整数リスト)
     L_values = create_L_domain(L)
-    one_epsilon = float(epsilon) / (pixel + 1)
         # information about which pixels belong to which cluster.
     clusters = create_cluster(pixel, cluster_num)
     # get the domain of tones.
     L_values = create_L_domain(L)
-    epsilon_for_onecluster = epsilon/cluster_num # budget for each cluster
+    epsilon_for_onecluster = epsilon/(cluster_num-1) # budget for each cluster
 
     timing_records = []
-    preds_bucket = []
     X_train,X_test,y_train,y_test=train_test_split(X_all,y_all,test_size=0.2,random_state=42)
 
     # ---- Train noise ----
@@ -720,7 +715,7 @@ def waldp_time(original_path, output_path, epsilon, pixel, L,cluster_num, seed,l
                 X_train_noise[:, j] = grr_array(X_train[:, j], epsilon_for_onepixel, L_values, seed + 10007 * j)
 
     label_domain = list(range(10))
-    #ラベルのノイズは１クラスター分
+    #ラベルのノイズ
     y_train_noise = grr_array(y_train, label_epsilon, label_domain, seed)
 
 
@@ -751,24 +746,15 @@ def waldp_time(original_path, output_path, epsilon, pixel, L,cluster_num, seed,l
 
 if __name__ == "__main__":
     data="FashionMNIST"
-    epsilons=[3]
-    params = [(14*14,2,10,2)] 
+    epsilons=[0]
+    params = [(0.5,4,10,0),(0.5,4,13,0)]
     model="model2"
     seed=1
-    for P, L,cluster_num,label_epsilon in params:
-        for eps in epsilons:     
-            if L==2:
-                if data=="FashionMNIST":
-                    input_path = f"../../data/{data}/CWALDP/fmnist_full_L2_PI0.5.npz"
-                else:
-                    input_path = f"../../data/{data}/CWALDP/cifar_full_L2_PI0.5_20251209-021838.npz"
-            elif L==4:
-                if data=="FashionMNIS":
-                    input_path = f"../../data/{data}/CWALDP/fmnist_full_L4_PI0.25_20251031-173306.npz"
-                else:
-                    input_path = f"../../data/{data}/CWALDP/cifar_full_L4_PI0.25_20251028-173658.npz"
+    for PI, L,cluster_num,label_epsilon in params:
+        for eps in epsilons:        
+            input_path = f"../../data/{data}/CWALDP/fmnist_full_L{L}_PI{PI}.npz"
             # 現在日時を取得し、YYYYMMDD-HHMMSS形式の文字列を生成
             timestamp = datetime.datetime.now().strftime("%Y%m%d")
-            output_path = f"../../experiments/{data}/CWALDP/CNN/{timestamp}/RR_waldp_L{L}_PI{P}_C{cluster_num}_eps{eps}_label_noise_{label_epsilon}_{model}_seed{seed}.png"
+            output_path = f"../../experiments/{data}/CWALDP/CNN/{timestamp}/RR_waldp_L{L}_PI{PI}_C{cluster_num}_eps{eps}_label_noise_{label_epsilon}_{model}_seed{seed}.png"
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            waldp_time(input_path, output_path, eps*P*cluster_num/(cluster_num-1), P, L,cluster_num,seed,label_epsilon,model)
+            waldp_time(input_path, output_path, eps, PI, L,cluster_num,seed,label_epsilon,model)

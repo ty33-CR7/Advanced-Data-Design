@@ -90,8 +90,8 @@ def main():
     # --- モード選択 ---
     dataset_mode = "FashionMNIST" # 実行したいデータセットに変更してください
     DATA_PATH=f"../../data/{dataset_mode}/"
-    L = 2       # 階調段階数 (例: FMNISTでよく使われる)
-    PI = 0.25    # 面積比 (例: 0.5は1回統合、0.25は2回統合)
+    L = 4     # 階調段階数 (例: FMNISTでよく使われる)
+    PI = 0.5    # 面積比 (例: 0.5は1回統合、0.25は2回統合)
     BATCH_SIZE = 128
     OUTDIR = DATA_PATH+"CWALDP"
     os.makedirs(OUTDIR, exist_ok=True)
