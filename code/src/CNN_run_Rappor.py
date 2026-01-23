@@ -8,7 +8,7 @@ import json
 import math
 import tensorflow as tf
 import argparse
-
+import gc
 
 def calculate_best_2d_shape(L):
     """
@@ -96,64 +96,87 @@ def _collect_env_metadata():
     }
     
 
-def output_time_result(records, filename):
+
+
+def output_time_result(records, filename, model_summary=""):
     """
-    Write timing measurement records to CSV (new schema).
-    Each record should contain keys:
-      epsilon, noise_p, k, seed, fold, time_sec, accuracy
-    Writes environment metadata as commented header lines when creating new file.
+    Write timing measurement records to CSV.
+    Each record contains keys matching the new dictionary structure:
+      P, L, epsilon, seed, fold, time_sec,
+      test_loss, test_noise_loss, train_loss,
+      test_accuracy, test_noise_accuracy, train_accuracy
     """
     file_exists = os.path.exists(filename)
     write_header = not file_exists
 
     with open(filename, mode="a", encoding="utf-8", newline="") as f:
-        if write_header:
-            # 既存の環境メタ情報をコメント行で出力
-            meta = _collect_env_metadata()
-            for k, v in meta.items():
-                f.write(f"# {k}: {v}\n")
+            if write_header:
+                # 環境メタデータの書き込み（必要であれば関数を呼び出す）
+                # meta = _collect_env_metadata()
+                # for k, v in meta.items():
+                #     f.write(f"# {k}: {v}\n")
+                
+                # --- モデルの概要をコメントとして追加 ---
+                if model_summary:
+                    f.write("# Model Summary:\n")
+                    for line in model_summary.splitlines():
+                        f.write(f"# {line}\n")
+                # ----------------------------------------
 
-        writer = csv.writer(f)
-        if write_header:
-            writer.writerow([
-                "epsilon", "noise_p", "k", "seed", "fold",
-                "time_sec", "accuracy"
-            ])
+            writer = csv.writer(f)
+            
+            # ★ 修正: ヘッダーを新しい辞書のキーに合わせて更新
+            if write_header:
+                writer.writerow([
+                    "epsilon", "noise_p", "k", "seed", "fold",
+                    "time_sec","test_loss", "test_noise_loss", "train_loss",
+                    "test_accuracy", "test_noise_accuracy", "train_accuracy"
+                ])
 
-        for r in records:
-            writer.writerow([
-                r.get('epsilon', ''),
-                r.get('noise_p', ''),
-                r.get('k', ''),
-                r.get('seed', ''),
-                r.get('fold', ''),
-                f"{r.get('time_sec', 0):.9f}",
-                f"{r.get('accuracy', 0):.4f}",
-            ])
+            for r in records:
+                # ★ 修正: 新しい辞書のキーに合わせて値を取り出し
+                writer.writerow([
+                    r.get('epsilon', ''),
+                    r.get('noise_p', ''),
+                    r.get('k', ''),
+                    r.get('seed', ''),
+                    r.get('fold', ''),
+                    f"{r.get('time_sec', 0):.9f}",
+                    # Loss関係
+                    f"{r.get('test_loss', 0):.4f}",
+                    f"{r.get('test_noise_loss', 0):.4f}",
+                    f"{r.get('train_loss', 0):.4f}",
+                    # Accuracy関係
+                    f"{r.get('test_accuracy', 0):.4f}",
+                    f"{r.get('test_noise_accuracy', 0):.4f}",
+                    f"{r.get('train_accuracy', 0):.4f}"
+                ])
 
     print(f"Add timing results to CSV file {filename} (rows added: {len(records)})")
 
-
-
-def train_fminist(X_train_noise,X_test_noise,y_train_reshaped,y_test):
+def train_model(X_train_noise,X_test_noise,X_test,y_train_reshaped,y_test,model_selection):
         n_features = X_train_noise.shape[1]
         input_shape = (n_features, 1) # シーケンス長=特徴量数, 特徴量数=1
         X_train_noise_reshaped = X_train_noise.reshape(-1, n_features, 1)
         X_test_noise_reshaped = X_test_noise.reshape(-1, n_features, 1)
+        X_test_reshaped = X_test.reshape(-1, n_features, 1)
         # --------------------------
         # 1D CNNモデルの定義
         # --------------------------
-        model = tf.keras.models.Sequential([
-            tf.keras.layers.Conv1D(32, 5, activation="relu", input_shape=input_shape), # input_shapeは事前に定義が必要
-            tf.keras.layers.MaxPooling1D(2),
-            tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.Conv1D(64, 5, activation="relu"),
-            tf.keras.layers.MaxPooling1D(2),
-            tf.keras.layers.Dropout(0.3),
-            tf.keras.layers.Flatten(),
-            tf.keras.layers.Dense(128, activation="relu"),
-            tf.keras.layers.Dense(10, activation="softmax") # 出力層のユニット数(10)は分類クラス数と一致しているか確認
-        ])
+        if model_selection=="model1":
+            model = tf.keras.models.Sequential([
+                tf.keras.layers.Conv1D(32, 5, activation="relu", input_shape=input_shape), # input_shapeは事前に定義が必要
+                tf.keras.layers.MaxPooling1D(2),
+                tf.keras.layers.Dropout(0.2),
+                tf.keras.layers.Conv1D(64, 5, activation="relu"),
+                tf.keras.layers.MaxPooling1D(2),
+                tf.keras.layers.Dropout(0.3),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128, activation="relu"),
+                tf.keras.layers.Dense(10, activation="softmax") # 出力層のユニット数(10)は分類クラス数と一致しているか確認
+            ])
+        else:
+            raise ValueError("modelが指定されていないです")
 
         # --------------------------
         # コンパイル
@@ -164,105 +187,40 @@ def train_fminist(X_train_noise,X_test_noise,y_train_reshaped,y_test):
         def scheduler(epoch, lr): 
             if epoch > 10: return lr * 0.5 
             return lr 
+        
         lr_schedule = tf.keras.callbacks.LearningRateScheduler(scheduler) 
         # -------------------------- # 学習 # -------------------------- 
         history = model.fit( X_train_noise_reshaped, y_train_reshaped, # 変数名を調整 
                             validation_split=0.2, 
-                            epochs=10, 
+                            epochs=30, 
                             batch_size=256, 
-                            callbacks=[early_stop, lr_schedule], 
-                            verbose=0 # 訓練中の出力を抑制し、最後にまとめて計測する場合 
-                            )
-        # --------------------------
-        # テスト評価 (推論と精度の計算)
-        # --------------------------
-        # model.evaluateは推論と同時に損失と精度を計算する
-        test_loss, test_acc = model.evaluate(X_test_noise_reshaped, y_test, verbose=0) # 変数名を調整
-        return test_loss,test_acc
-
-
-
-def train_CIFAR10(X_train_noise,X_test_noise,y_train_reshaped,y_test):
-        # データの全長 (BFの長さ) を取得
-        # 例: n_features が 784 の場合
-        n_features = X_train_noise.shape[1] 
-
-        # 最適な高さ H と幅 W を計算 (例: 784 -> (28, 28))
-        H, W = calculate_best_2d_shape(n_features)
-        print(H,W)
-        C = 1 # チャンネル数 (BFはグレースケールとして扱うため 1)
-
-        # 1. 2次元CNNが期待する4次元形状 (N, H, W, C) にリシェイプ
-        X_train_noise_reshaped = X_train_noise.reshape(-1, H, W, C)
-        X_test_noise_reshaped = X_test_noise.reshape(-1, H, W, C)
-
-        # 2. Conv2D層の入力形状 (バッチサイズを除く3次元)
-        input_shape = (H, W, C)
-        # --------------------------
-        # 1D CNNモデルの定義
-        # --------------------------
-        model = tf.keras.models.Sequential([
-            # ----------------------------------------
-            # 1. 第1畳み込みブロック
-            # ----------------------------------------
-            tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape),
-            tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-            tf.keras.layers.Dropout(0.5),
-            
-            # ----------------------------------------
-            # 2. 第2畳み込みブロック
-            # ----------------------------------------
-            tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
-            tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-            tf.keras.layers.MaxPooling2D((2, 2)),
-            tf.keras.layers.Dropout(0.5),
-
-            # ----------------------------------------
-            # 3. 全結合層への準備
-            # ----------------------------------------
-            tf.keras.layers.Flatten(), # 2Dテンソルを1Dベクトルに変換
-
-            # ----------------------------------------
-            # 4. 第1全結合層 (Dense)
-            # ----------------------------------------
-            tf.keras.layers.Dense(100, activation='relu'),
-            tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-            tf.keras.layers.Dropout(0.5),
-
-            # ----------------------------------------
-            # 5. 出力層 (Dense)
-            # ----------------------------------------
-            tf.keras.layers.Dense(10, activation='softmax') # クラス分類数が10と仮定
-        ])
-
-        # --------------------------
-        # コンパイル
-        # --------------------------
-        model.compile( optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3), loss="sparse_categorical_crossentropy", metrics=["accuracy"] )
-        # -------------------------- # コールバック設定 # -------------------------- 
-        early_stop = tf.keras.callbacks.EarlyStopping( monitor="val_loss", patience=5, restore_best_weights=True ) 
-        def scheduler(epoch, lr): 
-            if epoch > 10: return lr * 0.5 
-            return lr 
-        lr_schedule = tf.keras.callbacks.LearningRateScheduler(scheduler) 
-        # -------------------------- # 学習 # -------------------------- 
-        history = model.fit( X_train_noise_reshaped, y_train_reshaped, # 変数名を調整 
-                            validation_split=0.2, 
-                            epochs=10, 
-                            batch_size=256, 
-                            callbacks=[early_stop, lr_schedule], 
+                            callbacks=[early_stop,lr_schedule], 
                             verbose=1 # 訓練中の出力を抑制し、最後にまとめて計測する場合 
                             )
+        train_loss = history.history['loss'][-1]
+        train_acc = history.history['accuracy'][-1]
+        # model.summary()が実行可能であることを確認
+        stringlist = []
+        # ★ 修正箇所: line_break=Falseなどの追加引数を吸収するため、**kwargs を追加
+        model.summary(print_fn=lambda x, **kwargs: stringlist.append(x))
+        model_summary = "\n".join(stringlist)
         # --------------------------
         # テスト評価 (推論と精度の計算)
         # --------------------------
         # model.evaluateは推論と同時に損失と精度を計算する
-        test_loss, test_acc = model.evaluate(X_test_noise_reshaped, y_test, verbose=0) # 変数名を調整
-        return test_loss,test_acc
+        test_noise_loss, test_noise_acc = model.evaluate(X_test_noise_reshaped, y_test, verbose=0) # 変数名を調整
+        test_loss, test_acc = model.evaluate(X_test_reshaped, y_test, verbose=0) # 変数名を調整
+        # --- 【ここを追加】メモリ解放処理 ---
+        del model       # Pythonのオブジェクトを削除
+        tf.keras.backend.clear_session()  # TensorFlowのバックエンドメモリを解放
+        gc.collect()    # Pythonのガベージコレクションを強制実行
+        return test_loss,test_acc,test_noise_loss,test_noise_acc, train_loss, train_acc,model_summary
 
 
 
-def waldp_time(original_path, output_path, epsilon, noise_p, hash_number,seeds,test_noise,label_epsilon,data):
+
+
+def waldp_time(original_path, output_path, epsilon, noise_p, hash_number,seeds,label_epsilon,data,model):
     """
     Measure training/inference time of RandomForest on GRR-perturbed WA datasets.
 
@@ -293,6 +251,7 @@ def waldp_time(original_path, output_path, epsilon, noise_p, hash_number,seeds,t
     dat = np.load(original_path, allow_pickle=True)
     print(dat)
     bf= dat["X_bits"].astype(np.uint8)
+    #bit演算での計算を楽にするため、わざわざpackbitsにしている
     packed_bf=[np.packbits(row) for row in bf]
     X_bits= np.array(packed_bf,dtype=np.uint8)
     y = dat["y"]
@@ -301,7 +260,8 @@ def waldp_time(original_path, output_path, epsilon, noise_p, hash_number,seeds,t
     print("BF_length",l)
 
     timing_records = []
-    preds_bucket = []
+    model_summary_str = ""
+
     
     for fid in range(1,11):
         val_idx = np.load(os.path.join(IDX_DIR, f"fold_{fid}.npy"))
@@ -317,24 +277,15 @@ def waldp_time(original_path, output_path, epsilon, noise_p, hash_number,seeds,t
             ]
             # --- 4) 一括展開 (unpackbits) ---
             X_noisy = np.array([np.unpackbits(x)[:l] for x in X_noisy_packed], dtype=np.uint8)
-            X_noisy =np.int8( (2 * X_noisy) - 1)
+            X_noisy =np.int8( (2 * X_noisy) - 1) #[0,1]->[-1,1]
+            
             print("X_noisy shape:", X_noisy.shape)  # (N, l)
 
             X_train_noise, y_train = X_noisy[train_idx], y[train_idx]
-            X_test_noise, y_test = X_noisy[val_idx], y[val_idx]
-            n_features = X_train_noise.shape[1]
-            input_shape = (n_features, 1) # シーケンス長=特徴量数, 特徴量数=1
-            X_train_noise_reshaped = X_train_noise.reshape(-1, n_features, 1)
-            X_test_noise_reshaped = X_test_noise.reshape(-1, n_features, 1)
-            
-            
-            #クラスラベルのノイズの有無
-            if test_noise is False:
-                y_train_reshaped = y_train.ravel() # y_trainが(n_samples, 1)の場合、(n_samples,)に変換
-            else:
-                label_domain = list(range(10))
-                y_train_noise = grr_array(y_train, label_epsilon, label_domain, seed)
-                y_train_reshaped = y_train_noise.ravel()
+            X_test_noised, y_test = X_noisy[val_idx], y[val_idx]
+            X_test=bf[val_idx]            
+            label_domain = list(range(10))
+            y_train_noise = grr_array(y_train, label_epsilon, label_domain, seed)
                 
 
 
@@ -342,19 +293,19 @@ def waldp_time(original_path, output_path, epsilon, noise_p, hash_number,seeds,t
             # ---- Train + inference time ----
             ts = time.perf_counter_ns()
             
-            if data=="fmnist":
-                test_loss,test_acc=train_fminist(X_train_noise,X_test_noise,y_train_reshaped,y_test)
-            
-            elif data=="CIFAR10":
-                
-                test_loss,test_acc=train_CIFAR10(X_train_noise,X_test_noise,y_train_reshaped,y_test)
-            
+            if data=="FashionMNIST":
+                test_loss,test_acc,test_noise_loss,test_noise_acc, train_loss, train_acc,current_summary = train_model(X_train_noise,X_test_noised,X_test,y_train_noise,y_test,model)
+
             te = time.perf_counter_ns()
+            
+            # 初回または更新が必要な場合にサマリーを保存
+            if not model_summary_str:
+                 model_summary_str = current_summary
+
 
             elapsed_sec = (te - ts) / 1_000_000_000.0
-            acc = test_acc # accuracy_scoreの代わりにKerasの評価精度を使用
 
-            print(f"ε:{epsilon},noise_p:{noise_p} fold:{fid}, seed:{seed},time(s):{elapsed_sec:.6f}, acc:{acc:.4f}")
+            print(f"ε:{epsilon},noise_p:{noise_p} fold:{fid}, seed:{seed},time(s):{elapsed_sec:.6f}, acc:{test_acc:.4f}")
 
             timing_records.append({
                 'epsilon': float(epsilon),
@@ -363,15 +314,18 @@ def waldp_time(original_path, output_path, epsilon, noise_p, hash_number,seeds,t
                 'seed': int(seed),
                 'fold': int(fid),
                 'time_sec': float(elapsed_sec),
-                'accuracy': float(acc),
+                'test_loss': float(test_loss),
+                'test_noise_loss': float(test_noise_loss),
+                'train_loss': float(train_loss),
+                'test_accuracy': float(test_acc),
+                'test_noise_accuracy': float(test_noise_acc),
+                'train_accuracy': float(train_acc),
             })
 
 
     # ---- 結果保存 ----
-    output_time_result(timing_records, output_path)
-    preds_path = os.path.splitext(output_path)[0] + "_preds.npz"
-
-
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    output_time_result(timing_records, output_path, model_summary_str)
     return timing_records
 
 
@@ -385,35 +339,29 @@ if __name__ == "__main__":
     # 2. 引数のパース（必須）
     args = ap.parse_args()
     seeds = [1,2,3]
-    params = [1]
-    test_noise=True
-    label_epsilon=2
+    hash_number=1
+    label_epsilon=0
+    model="model1"
     BASE = os.path.dirname(os.path.abspath(__file__))
-    for hash_number in params:
-        for eps in [1,2,3]:
-            if args.data=="FashionMNIST":
-                original_path = f"./data/{args.data}/Rappor/fmnist_rappor_bfonly_mFalse_k1496_h{hash_number}.npz"
-                IDX_DIR = os.path.join(BASE, "./fmnist/split_indices_full_gray")
-            elif args.data=="CIFAR10":
-                 original_path = f"./data/{args.data}/Rappor/cifar10_rappor_bfonly_mFalse_k1496_h{hash_number}.npz"
-                 IDX_DIR = os.path.join(BASE, "./CIFAR10/split_indices_full_gray")  
+    for eps in [1,2,3]:
+        if args.data=="FashionMNIST":
+            original_path = f"../../data/{args.data}/Rappor/fmnist_rappor_bfonly_mFalse_k1496_h{hash_number}.npz"
+            IDX_DIR = os.path.join(BASE, "../../split_indices_full_gray/FashionMNIST")
+        elif args.data=="CIFAR10":
+                original_path = f"./data/{args.data}/Rappor/cifar10_rappor_bfonly_mFalse_k1496_h{hash_number}.npz"
+                IDX_DIR = os.path.join(BASE, "./CIFAR10/split_indices_full_gray")  
+        
+        else:
+            # 予期しない値が渡された場合に ValueError を発生させる
+                raise ValueError(f"Unknown dataset '{args.data}'")
             
-            else:
-                # 予期しない値が渡された場合に ValueError を発生させる
-                  raise ValueError(f"Unknown dataset '{args.data}'")
-              
-            if_condition = "<"  # 実際のp範囲に応じて変更
-            if if_condition == ">":
-                noise_p = 1 / (1 + math.exp(-eps / (2 * hash_number)))
-            else:
-                noise_p = 1 / (1 + math.exp(eps / (2 * hash_number)))
-                
-            if eps==0:
-                noise_p=0
-            if test_noise is True:
-                output_path = f"../results/fmnist/time/CNN/{args.data}/Rappor/Rappor_eps{eps}_k{hash_number}_noise{noise_p}_label_noise_{label_epsilon}time_.csv"
-                os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            else:
-                output_path = f"../results/fmnist/time/CNN/{args.data}/Rappor/Rappor_eps{eps}_k{hash_number}_noise{noise_p}_label_noise_{test_noise}time_.csv"
-                
-            waldp_time(original_path, output_path, eps,noise_p,hash_number, seeds, test_noise, label_epsilon,args.data)
+        if_condition = "<"  # 実際のp範囲に応じて変更
+        if if_condition == ">":
+            noise_p = 1 / (1 + math.exp(-eps / (2 * hash_number)))
+        else:
+            noise_p = 1 / (1 + math.exp(eps / (2 * hash_number)))
+      # 現在日時を取得し、YYYYMMDD-HHMMSS形式の文字列を生成
+        timestamp = datetime.datetime.now().strftime("%Y%m%d")
+        output_path = f"../../experiments/{args.data}/Rappor/CNN/Rappor_eps{eps}_k{hash_number}_noise{noise_p}_label_noise_{label_epsilon}_{model}.csv"
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        waldp_time(original_path, output_path, eps,noise_p,hash_number, seeds, label_epsilon,args.data, model)

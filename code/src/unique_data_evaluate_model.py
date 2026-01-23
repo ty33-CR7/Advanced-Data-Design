@@ -1,15 +1,10 @@
-import pandas as pd
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score
-from tqdm import tqdm
-import csv, os, time, platform, datetime
-import sklearn
-import json
+import os, time, datetime
+from  sklearn.model_selection import train_test_split
 import math
 import tensorflow as tf
-import gc # ファイル冒頭に追加
-
+import os, time, numpy as np
+import matplotlib.pyplot as plt
 # --- モデルサマリーを取得するヘルパー関数 (新規追加) ---
 def _get_model_summary_string(model):
     """
@@ -17,7 +12,7 @@ def _get_model_summary_string(model):
     """
     stringlist = []
     # model.summary()が実行可能であることを確認するために compile() を先に実行
-    # train_model内でcompileしているため、厳密には不要だが安全のために残す
+    # train_CIFAR10内でcompileしているため、厳密には不要だが安全のために残す
     # ただし、ここではモデル構築"後"に実行する前提なので、引数で渡されたモデルに対して実行する。
     model.summary(print_fn=lambda x: stringlist.append(x))
     return "\n".join(stringlist)
@@ -69,8 +64,71 @@ def GRR(column, epsilon, value_list, random_seed):
     return out
 
 
+def ResNet18_Custom(input_shape, classes=10):
+    """
+    ResNet18 の基本構造を定義する (厳密にはオリジナル ResNet18 の Basic Block を Bottleneck のように実装している部分がありますが、
+    Kerasの慣例としてこの形で定義します。Basic Block (2層) の構造に修正します。)
+    ※ 注: オリジナルのResNet18は 1x1 畳み込みを含まない Basic Block を使用します。
+    ここでは、ResNet18の層数 (9つの残差ブロック = 18層) を再現します。
+    """
+    X_input = tf.keras.Input(input_shape)
+    
+    # Zero-Padding
+    X = tf.keras.layers.ZeroPadding2D((3, 3))(X_input)
+    
+    # Stage 1: 初期畳み込み
+    X = tf.keras.layers.Conv2D(64, (7, 7), strides=(2, 2), padding='valid')(X)
+    X = tf.keras.layers.BatchNormalization(axis=3)(X)
+    X = tf.keras.layers.Activation('relu')(X)
+    X = tf.keras.layers.MaxPooling2D((3, 3), strides=(2, 2), padding='same')(X)
+    
+    # Stage 2: 2x Basic Block (64 フィルタ)
+    # ここでは Bottleneck の代わりに Basic Block (2層、3x3 Conv) を使用
+    X = basic_block(X, 3, [64, 64], stage=2, block='a', stride=1)
+    X = basic_block(X, 3, [64, 64], stage=2, block='b', stride=1)
+    
+    # Stage 3: 2x Basic Block (128 フィルタ, stride 2 でダウンサンプリング)
+    X = basic_block(X, 3, [128, 128], stage=3, block='a', stride=2)
+    X = basic_block(X, 3, [128, 128], stage=3, block='b', stride=1)
+    
+    # Stage 4: 2x Basic Block (256 フィルタ, stride 2 でダウンサンプリング)
+    X = basic_block(X, 3, [256, 256], stage=4, block='a', stride=2)
+    X = basic_block(X, 3, [256, 256], stage=4, block='b', stride=1)
 
+    # Stage 5: 2x Basic Block (512 フィルタ, stride 2 でダウンサンプリング)
+    X = basic_block(X, 3, [512, 512], stage=5, block='a', stride=2)
+    X = basic_block(X, 3, [512, 512], stage=5, block='b', stride=1)
+    
+    # 最終層
+    X = tf.keras.layers.GlobalAveragePooling2D()(X)
+    X = tf.keras.layers.Dense(classes, activation='softmax')(X)
+    
+    model = tf.keras.models.Model(inputs=X_input, outputs=X, name='ResNet18')
+    return model
 
+def basic_block(X, f, filters, stage, block, stride):
+    """ResNet18で使われるオリジナルの Basic Block (3x3 Conv x 2)"""
+    F1, F2 = filters
+    X_shortcut = X
+    
+    # パスの開始時に次元変更が必要な場合 (stride > 1 またはチャネル変更)
+    if stride != 1 or X_shortcut.shape[-1] != F1:
+        X_shortcut = tf.keras.layers.Conv2D(F1, (1, 1), strides=(stride, stride), padding='valid', name='res' + str(stage) + block + '_branch0')(X_shortcut)
+        X_shortcut = tf.keras.layers.BatchNormalization(axis=3, name='bn' + str(stage) + block + '_branch0')(X_shortcut)
+
+    # メインパス 1 (3x3 畳み込み)
+    X = tf.keras.layers.Conv2D(F1, (f, f), strides=(stride, stride), padding='same', name='res' + str(stage) + block + '_branch2a')(X)
+    X = tf.keras.layers.BatchNormalization(axis=3, name='bn' + str(stage) + block + '_branch2a')(X)
+    X = tf.keras.layers.Activation('relu')(X)
+    
+    # メインパス 2 (3x3 畳み込み)
+    X = tf.keras.layers.Conv2D(F2, (f, f), padding='same', name='res' + str(stage) + block + '_branch2b')(X)
+    X = tf.keras.layers.BatchNormalization(axis=3, name='bn' + str(stage) + block + '_branch2b')(X)
+    
+    # スキップ接続の追加と ReLU 活性化
+    X = tf.keras.layers.Add()([X, X_shortcut])
+    X = tf.keras.layers.Activation('relu')(X)
+    return X
 
 # ---- Generalized Randomized Response (整数値対応) ----
 def grr_array(values, eps, domain, seed):
@@ -301,7 +359,7 @@ def flat(idx_tuple_list, P):
         return flat_idx_list
 
 
-def train_model(X_train_noise,X_test_noise,X_test,y_train_reshaped,y_test,model_selection):
+def train_CIFAR10(X_train_noise,X_test_noise,X_test,y_train_reshaped,y_test,model_selection):
         # データの全長 (BFの長さ) を取得
         edge_size=int(math.sqrt(X_train_noise.shape[1]))
         H, W = edge_size,edge_size
@@ -463,6 +521,8 @@ def train_model(X_train_noise,X_test_noise,X_test,y_train_reshaped,y_test,model_
                 # ========================================
                 tf.keras.layers.Dense(10, activation='softmax')
             ])
+        elif model_selection=="Resnet18":
+            model=ResNet18_Custom(input_shape, classes=10)
 
         #tf.keras.layers.MaxPooling2D((2, 2)),
 
@@ -479,13 +539,12 @@ def train_model(X_train_noise,X_test_noise,X_test,y_train_reshaped,y_test,model_
         # -------------------------- # 学習 # -------------------------- 
         history = model.fit( X_train_noise_reshaped, y_train_reshaped, # 変数名を調整 
                             validation_split=0.2, 
-                            epochs=30, 
+                            epochs=50, 
                             batch_size=256, 
-                            callbacks=[early_stop,lr_schedule], 
+                            callbacks=[early_stop, lr_schedule], 
                             verbose=1 # 訓練中の出力を抑制し、最後にまとめて計測する場合 
                             )
-        train_loss = history.history['loss'][-1]
-        train_acc = history.history['accuracy'][-1]
+        
         # model.summary()が実行可能であることを確認
         stringlist = []
         # ★ 修正箇所: line_break=Falseなどの追加引数を吸収するため、**kwargs を追加
@@ -497,125 +556,104 @@ def train_model(X_train_noise,X_test_noise,X_test,y_train_reshaped,y_test,model_
         # model.evaluateは推論と同時に損失と精度を計算する
         test_noise_loss, test_noise_acc = model.evaluate(X_test_noise_reshaped, y_test, verbose=0) # 変数名を調整
         test_loss, test_acc = model.evaluate(X_test_reshaped, y_test, verbose=0) # 変数名を調整
-        train_loss, train_acc = model.evaluate(X_train_noise_reshaped,y_train_reshaped, verbose=0)
-        # --- 【ここを追加】メモリ解放処理 ---
-        del model       # Pythonのオブジェクトを削除
-        tf.keras.backend.clear_session()  # TensorFlowのバックエンドメモリを解放
-        gc.collect()    # Pythonのガベージコレクションを強制実行
-        return test_loss,test_acc,test_noise_loss,test_noise_acc, train_loss, train_acc,model_summary
+        return test_loss,test_acc,test_noise_loss,test_noise_acc,model_summary,history
+            
             
 
-def output_result(data, filename):
+
+import matplotlib.pyplot as plt
+
+def plot_learning_curves(history, test_loss, test_acc,test_noise_loss, test_noise_acc, output_path,model_name="Model"):
     """
-    add results to disignated file.
+    LossとAccuracyの学習曲線を描画し、
+    Train/Valの推移に加え、Test(最終評価)の点もプロットする
     """
-    file_exists = os.path.exists(filename)  
+    loss = history.history['loss']
+    val_loss = history.history['val_loss']
+    acc = history.history['accuracy']
+    val_acc = history.history['val_accuracy']
+    
+    epochs = range(1, len(loss) + 1)
+    last_epoch = len(loss)
 
-    # CSVファイルに追記
-    with open(filename, mode="a", encoding="utf-8", newline="") as file:
-        writer = csv.writer(file)
+    # グラフの枠を用意（1行2列）
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    fig.suptitle(f'{model_name} Learning Curves', fontsize=16)
 
-        if not file_exists:
-            writer.writerow(["P", "L", "epsilon", "accuracy"])
+    # ==========================================
+    # 1. Loss のプロット (左側)
+    # ==========================================
+    final_train_loss = loss[-1]
+    final_val_loss = val_loss[-1]
+    
+    # Train / Val のライン
+    ax1.plot(epochs, loss, 'bo-', label=f'Train: {final_train_loss:.4f}')
+    ax1.plot(epochs, val_loss, 'r*-', label=f'Val:   {final_val_loss:.4f}')
+    
+    # Test のポイント (最終エポックの位置に緑の星)
+    ax1.plot(last_epoch, test_loss, 'g*', markersize=15, label=f'Test:  {test_loss:.4f}')
+    ax1.plot(last_epoch, test_noise_loss, 'y*', markersize=15, label=f'Test_noise:  {test_noise_loss:.4f}')
 
-        # データ行を書く
-        for key, value in data.items():
-            writer.writerow([*key, value])
+    # Gapの可視化 (TrainとValの間)
+    loss_gap = final_val_loss - final_train_loss
+    mid_loss = (final_train_loss + final_val_loss) / 2
+    ax1.vlines(last_epoch, final_train_loss, final_val_loss, colors='gray', linestyles='dashed', alpha=0.5)
+    ax1.annotate(f'Gap: {loss_gap:.4f}', 
+                 xy=(last_epoch, mid_loss), 
+                 xytext=(last_epoch - 1, mid_loss),
+                 arrowprops=dict(facecolor='black', arrowstyle='->'),
+                 horizontalalignment='right')
 
-    print(f"Add results to CSV file {filename}")
+    ax1.set_title('Loss (Lower is Better)')
+    ax1.set_xlabel('Epochs')
+    ax1.set_ylabel('Loss')
+    ax1.legend()
+    ax1.grid(True)
 
-def _collect_env_metadata():
-    return {
-        "timestamp_utc": datetime.datetime.utcnow().isoformat() + "Z",
-        "python_version": platform.python_version(),
-        "os": f"{platform.system()} {platform.release()} ({platform.version()})",
-        "machine": platform.machine(),
-        "processor": platform.processor(),
-        "cpu_count": os.cpu_count(),
-        "numpy": np.__version__,
-        "pandas": pd.__version__,
-        "sklearn": sklearn.__version__,
-    }
+    # ==========================================
+    # 2. Accuracy のプロット (右側)
+    # ==========================================
+    final_train_acc = acc[-1]
+    final_val_acc = val_acc[-1]
 
-import os, csv
+    # Train / Val のライン
+    ax2.plot(epochs, acc, 'bo-', label=f'Train: {final_train_acc:.4f}')
+    ax2.plot(epochs, val_acc, 'r*-', label=f'Val:   {final_val_acc:.4f}')
+    
+    # Test のポイント (最終エポックの位置に緑の星)
+    ax2.plot(last_epoch, test_acc, 'g*', markersize=15, label=f'Test:  {test_acc:.4f}')
+    ax2.plot(last_epoch, test_noise_acc, 'y*', markersize=15, label=f'Test_noise:  {test_noise_acc:.4f}')
 
-import os
-import csv
+    # Gapの可視化
+    acc_gap = final_train_acc - final_val_acc 
+    mid_acc = (final_train_acc + final_val_acc) / 2
+    ax2.vlines(last_epoch, final_train_acc, final_val_acc, colors='gray', linestyles='dashed', alpha=0.5)
+    ax2.annotate(f'Gap: {acc_gap:.4f}', 
+                 xy=(last_epoch, mid_acc), 
+                 xytext=(last_epoch - 1, mid_acc),
+                 arrowprops=dict(facecolor='black', arrowstyle='->'),
+                 horizontalalignment='right')
 
-def output_time_result(records, filename, model_summary=""):
-    """
-    Write timing measurement records to CSV.
-    Each record contains keys matching the new dictionary structure:
-      P, L, epsilon, seed, fold, time_sec,
-      test_loss, test_noise_loss, train_loss,
-      test_accuracy, test_noise_accuracy, train_accuracy
-    """
-    file_exists = os.path.exists(filename)
-    write_header = not file_exists
+    ax2.set_title('Accuracy (Higher is Better)')
+    ax2.set_xlabel('Epochs')
+    ax2.set_ylabel('Accuracy')
+    ax2.legend(loc='lower right')
+    ax2.grid(True)
 
-    with open(filename, mode="a", encoding="utf-8", newline="") as f:
-            if write_header:
-                # 環境メタデータの書き込み（必要であれば関数を呼び出す）
-                # meta = _collect_env_metadata()
-                # for k, v in meta.items():
-                #     f.write(f"# {k}: {v}\n")
-                
-                # --- モデルの概要をコメントとして追加 ---
-                if model_summary:
-                    f.write("# Model Summary:\n")
-                    for line in model_summary.splitlines():
-                        f.write(f"# {line}\n")
-                # ----------------------------------------
+    plt.tight_layout()
 
-            writer = csv.writer(f)
-            
-            # ★ 修正: ヘッダーを新しい辞書のキーに合わせて更新
-            if write_header:
-                writer.writerow([
-                    "P", "L", "epsilon", "seed", "fold",
-                    "time_sec",
-                    "test_loss", "test_noise_loss", "train_loss",
-                    "test_accuracy", "test_noise_accuracy", "train_accuracy"
-                ])
-
-            for r in records:
-                # ★ 修正: 新しい辞書のキーに合わせて値を取り出し
-                writer.writerow([
-                    r.get('P'),
-                    r.get('L'),
-                    r.get('epsilon'),
-                    r.get('seed'),
-                    r.get('fold'),
-                    f"{r.get('time_sec', 0):.9f}",
-                    # Loss関係
-                    f"{r.get('test_loss', 0):.4f}",
-                    f"{r.get('test_noise_loss', 0):.4f}",
-                    f"{r.get('train_loss', 0):.4f}",
-                    # Accuracy関係
-                    f"{r.get('test_accuracy', 0):.4f}",
-                    f"{r.get('test_noise_accuracy', 0):.4f}",
-                    f"{r.get('train_accuracy', 0):.4f}"
-                ])
-
-    print(f"Add timing results to CSV file {filename} (rows added: {len(records)})")
-
-
-# def load_config(config_path):
-#     with open(config_path, 'r') as f:
-#         config = yaml.safe_load(f)
-
-#     # DATA_ROOTなどの変数展開（あれば）
-#     # シンプルなパス設定なら不要な場合が多い
-
-#     return config
-
-import os, time, numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score
+    
+    # コンソール出力
+    print(f"=== {model_name} Final Metrics ===")
+    print(f"Loss     | Train: {final_train_loss:.4f}, Val: {final_val_loss:.4f}, Test: {test_loss:.4f},Test_noise: {test_noise_loss:.4f}")
+    print(f"Accuracy | Train: {final_train_acc:.4f}, Val: {final_val_acc:.4f}, Test: {test_acc:.4f},Test_noise: {test_noise_acc:.4f}")
+    
+    plt.savefig(output_path)
+    
 
 
 
-def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,seed,label_epsilon,data,model,IDX_DIR):
+def waldp_time(original_path, output_path, epsilon, pixel, L,cluster_num, seed,label_epsilon,model):
     """
     Measure training/inference time of RandomForest on GRR-perturbed WA datasets.
 
@@ -639,24 +677,20 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
     else:
         print("No GPU devices found. Running on CPU.")
         
+        
 
-    
     dat = np.load(original_path, allow_pickle=True)
-    X_all = np.asarray(dat["X_disc"]if "X_disc" in dat.files else dat["X_bits"])
-    y_all = np.asarray(dat["y_all"] if "y_all" in dat.files else dat["y"])
+    X_all = np.asarray(dat["X_bits"])
+    y_all = np.asarray(dat["y"])
 
     if y_all.ndim > 1:
         y_all = y_all.reshape(-1)
 
     assert X_all.shape[0] == y_all.shape[0], "X と y の件数が一致しません"
-    
-   
-    #画素数の計算
-    pixel=int(X_all.shape[1])
-    epsilon=pixel*epsilon_per_pixel
+
     # tone reduction domain (整数リスト)
     L_values = create_L_domain(L)
-
+    one_epsilon = float(epsilon) / (pixel + 1)
 
 
     timing_records = []
@@ -664,103 +698,78 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
     model_summary_str = ""
     # tone reduction domain (整数リスト)
     L_values = create_L_domain(L)
+    one_epsilon = float(epsilon) / (pixel + 1)
         # information about which pixels belong to which cluster.
     clusters = create_cluster(pixel, cluster_num)
-
-    epsilon_for_onecluster = epsilon/(cluster_num-1) #ラベルノイズを無視しているため、クラスターが一つ減る。 
+    # get the domain of tones.
+    L_values = create_L_domain(L)
+    epsilon_for_onecluster = epsilon/cluster_num # budget for each cluster
 
     timing_records = []
     preds_bucket = []
+    X_train,X_test,y_train,y_test=train_test_split(X_all,y_all,test_size=0.2,random_state=42)
+
+    # ---- Train noise ----
+    X_train_noise = X_train.copy()
+    for cluster in clusters:
+            epsilon_for_onepixel = epsilon_for_onecluster/len(cluster)
+            for j in cluster:
+                X_train_noise[:, j] = grr_array(X_train[:, j], epsilon_for_onepixel, L_values, seed + 10007 * j)
+
+    label_domain = list(range(10))
+    #ラベルのノイズは１クラスター分
+    y_train_noise = grr_array(y_train, label_epsilon, label_domain, seed)
+
+
+    X_test_noised = X_test.copy()
+    for cluster in clusters:
+        epsilon_for_onepixel = epsilon_for_onecluster/len(cluster)
+        for j in cluster:
+            X_test_noised[:, j] = grr_array(X_test[:, j],epsilon_for_onepixel, L_values, seed + 20011 * j)
+
+
+    # ---- Train + inference time ----
+    ts = time.perf_counter_ns()
     
-    for fid in range(1, 11):
-        val_idx = np.load(os.path.join(IDX_DIR, f"fold_{fid}.npy"))
-        train_idx = np.concatenate([
-            np.load(os.path.join(IDX_DIR, f"fold_{k}.npy"))
-            for k in range(1, 11) if k != fid
-        ]).astype(np.int64)
-
-        X_train, y_train = X_all[train_idx], y_all[train_idx]
-        X_test, y_test = X_all[val_idx], y_all[val_idx]
-
-        for seed in seeds:
-            # ---- Train noise ----
-            X_train_noise = X_train.copy()
-            for cluster in clusters:
-                    epsilon_for_onepixel = epsilon_for_onecluster/len(cluster)
-                    for j in cluster:
-                        X_train_noise[:, j] = grr_array(X_train[:, j], epsilon_for_onepixel, L_values, seed + 10007 * j)
-
-            label_domain = list(range(10))
-            #ラベルのノイズは１クラスター分
-            y_train_noise = grr_array(y_train, label_epsilon, label_domain, seed)
-
-            # ---- Test noise (UTS only) ----
-
-            X_test_noised = X_test.copy()
-            for cluster in clusters:
-                epsilon_for_onepixel = epsilon_for_onecluster/len(cluster)
-                for j in cluster:
-                    X_test_noised[:, j] = grr_array(X_test[:, j],epsilon_for_onepixel, L_values, seed + 20011 * j)
+    test_loss,test_acc,test_noise_loss, test_noise_acc,current_summary,history =train_CIFAR10(X_train_noise,X_test_noised,X_test,y_train_noise,y_test,model) 
+    
+    plot_learning_curves(history,test_loss,test_acc,test_noise_loss, test_noise_acc,output_path, model)
+    # 初回または更新が必要な場合にサマリーを保存
+    if not model_summary_str:
+            model_summary_str = current_summary
+    
+    te = time.perf_counter_ns()
 
 
-            # ---- Train + inference time ----
-            ts = time.perf_counter_ns()
-            
 
-            test_loss,test_acc,test_noise_loss,test_noise_acc, train_loss, train_acc,current_summary = train_model(X_train_noise,X_test_noised,X_test,y_train_noise,y_test,model)
-            # 初回または更新が必要な場合にサマリーを保存
-            if not model_summary_str:
-                 model_summary_str = current_summary
-            
-            te = time.perf_counter_ns()
-
-            elapsed_sec = (te - ts) / 1_000_000_000.0
-
-
-            print(f"P:{pixel}, L:{L}, ε:{epsilon}, fold:{fid}, seed:{seed}, time(s):{elapsed_sec:.6f}")
-
-            timing_records.append({
-                'P': pixel,
-                'L': L,
-                'epsilon': float(epsilon),
-                'seed': int(seed),
-                'fold': int(fid),
-                'time_sec': float(elapsed_sec),
-                'test_loss': float(test_loss),
-                'test_noise_loss': float(test_noise_loss),
-                'train_loss': float(train_loss),
-                'test_accuracy': float(test_acc),
-                'test_noise_accuracy': float(test_noise_acc),
-                'train_accuracy': float(train_acc),
-            })
-
-
-    # ---- 結果保存 ----
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    output_time_result(timing_records, output_path, model_summary_str)
     return timing_records
 
 
 
 if __name__ == "__main__":
     data="FashionMNIST"
-    seeds = [1, 2, 3]
-    epsilons=[1,2,3]
-    #(14*14,4,10,0),(14*14,4,13,0)(14*14,2,10,2),(14*14,2,13,2),(14*14,2,10,0),(14*14,2,13,0),(14*14,4,10,2),(14*14,4,13,2),
-    params = [(0.5,4,10,0),(0.5,4,10,0)]
+    epsilons=[2,3]
+    params = [(14*14,2,10,"TTS")] 
     model="model2"
-    for unique_dataset in [False]:
-        for PI, L,cluster_num,label_epsilon in params:
-            for eps in epsilons:  
+    seed=2
+    for P, L,cluster_num,test_env in params:
+        for eps in epsilons:
+            if eps==0:
+                label_epsilon=0
+            else:
+                label_epsilon=2      
+            if L==2:
                 if data=="FashionMNIST":
-                  if unique_dataset:
-                      IDX_DIR = os.path.join("../../", f"data/{data}/CWALDP/unique_img/fmnist_full_L{L}_PI{PI}")
-                      input_path = f"../../data/{data}/CWALDP/unique_img/fmnist_full_L{L}_PI{PI}/cleaned_fmnist_L{L}_PI{PI}.npz"
-                  else:
-                      IDX_DIR = os.path.join("../../", f"split_indices_full_gray/{data}")     
-                      input_path = f"../../data/{data}/CWALDP/fmnist_full_L{L}_PI{PI}.npz"
-                # 現在日時を取得し、YYYYMMDD-HHMMSS形式の文字列を生成
-                timestamp = datetime.datetime.now().strftime("%Y%m%d")
-                output_path = f"../../experiments/{data}/CWALDP/CNN/{timestamp}/{unique_dataset}_unique_RR_waldp_L{L}_PI{PI}_C{cluster_num}_eps{eps}_label_noise_{label_epsilon}_{model}.csv"
-            
-                waldp_time(input_path, output_path, eps, PI, L,cluster_num, seeds,label_epsilon,data,model,IDX_DIR)
+                    input_path = f"../../data/{data}/CWALDP/unique/fmnist_full_L2_PI0.5/cleaned_fmnist_L2_PI0.5.npz"
+                else:
+                    input_path = f"../../data/{data}/CWALDP/cifar_full_L2_PI0.5_20251209-021838.npz"
+            elif L==4:
+                if data=="FashionMNIS":
+                    input_path = f"../../data/{data}/CWALDP/fmnist_full_L4_PI0.25_20251031-173306.npz"
+                else:
+                    input_path = f"../../data/{data}/CWALDP/cifar_full_L4_PI0.25_20251028-173658.npz"
+            # 現在日時を取得し、YYYYMMDD-HHMMSS形式の文字列を生成
+            timestamp = datetime.datetime.now().strftime("%Y%m%d")
+            output_path = f"../../experiments/{data}/CWALDP/CNN/{timestamp}/clear_RR_waldp_L{L}_PI{P}_C{cluster_num}_eps{eps}_label_noise_{label_epsilon}_{model}_seed{seed}.png"
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            waldp_time(input_path, output_path, eps*P*cluster_num/(cluster_num-1), P, L,cluster_num,seed,label_epsilon,model)
