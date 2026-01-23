@@ -5,7 +5,6 @@ Fashion-MNISTをBloom Filter符号化して10分割CV用NPZを生成
 TensorFlow不要・sklearn＋NumPyのみで動作
 ノイズ付加オプション (--noise_p)
 """
-
 import numpy as np
 import hashlib, json, argparse, time, pandas as pd
 from concurrent.futures import ProcessPoolExecutor
@@ -98,6 +97,7 @@ def run_parallel(X, args, k, l):
 
 
 def main():
+    #現状Fmnistのみに対応
     ap = argparse.ArgumentParser()
     ap.add_argument("--fp", type=float, required=True)
     ap.add_argument("--neighbors", type=int, required=True)
@@ -137,15 +137,15 @@ def main():
     
     #784×(2*近傍数＋1)
     m = X.shape[1]*(2*args.neighbors+1)
-    l, k = compute_lk(args.fp, m)
+    bf_length, hash_number = compute_lk(args.fp, m)
     if args.hash_number!=None:
-        k=args.hash_number
-    print(f"[INFO] fp={args.fp}, n={args.neighbors}, l={l}, noise_p={args.noise_p},hash_number={k},PI={PI},L={L}")
+        hash_number=args.hash_number
+    print(f"[INFO] fp={args.fp}, n={args.neighbors}, bf_legnth={bf_length}, noise_p={args.noise_p},hash_number={hash_number},PI={PI},L={L}")
     #a=encode_sample(X[0], args.neighbors, k, l, args.noise_p)
-    X_bits = run_parallel(X, args, k, l)
-    meta = dict(fp=args.fp, neighbors=args.neighbors, noise_p=args.noise_p, l=l, k=k, splits=args.splits)
+    X_bits = run_parallel(X, args, hash_number, bf_length)
+    meta = dict(fp=args.fp, neighbors=args.neighbors, noise_p=args.noise_p, bf_length=bf_length, hash_number=hash_number)
     suffix = f"_NOISE{args.noise_p}" if args.noise_p > 0 else "_NOISE0"
-    out_name = args.out or f"./data/FashionMNIST/BF/imporve_fmnist_bf_cv{args.splits}_fp{args.fp}_n{args.neighbors}{suffix}_k{k}_PI{PI}_L{L}.npz"
+    out_name = args.out or f"../../data/FashionMNIST/BF/fmnist_zw_fp{args.fp}_n{args.neighbors}_bf_length{bf_legnth}_k{hash_number}_PI{PI}_L{L}.npz"
     elapsed = time.time() - start_time
     print(f"[SAVED] {out_name} ({elapsed:.1f}s)")
     os.makedirs(os.path.dirname(out_name),exist_ok=True)
@@ -160,8 +160,8 @@ def main():
         "neighbors": args.neighbors,
         "noise_p": args.noise_p,
         "samples": len(X),
-        "bits": l,
-        "hashes": k,
+        "bits": bf_length,
+        "hashes": hash_number,
         "elapsed_time_sec": round(elapsed, 2)
     }])
     df.to_csv("bf_generation_time.csv", index=False)

@@ -8,9 +8,7 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets, transforms
 from PIL import Image
 
-# ---------------------------------------------------------
-#  依存性回避のためのクラスと関数定義 (通常は別ファイルからインポート)
-# ---------------------------------------------------------
+
 
 class FullDataset(Dataset):
     """CIFAR-10 および FashionMNIST の 'train + test' 結合データセット"""
@@ -75,6 +73,7 @@ def discretize_to_median(flat_image, L):
     bin_width = 256 // L
     bin_medians = np.array([(i * bin_width + (i + 1) * bin_width) // 2 for i in range(L)])
     indices = (flat_image // bin_width).clip(0, L - 1).astype(int)
+    # nupmyのリストの番号に対応させるやつファンシーインデックス
     return bin_medians[indices]
 
 def exe_merge(X):
@@ -91,8 +90,8 @@ def main():
     # --- モード選択 ---
     dataset_mode = "FashionMNIST" # 実行したいデータセットに変更してください
     DATA_PATH=f"../../data/{dataset_mode}/"
-    L = 4       # 階調段階数 (例: FMNISTでよく使われる)
-    PI = 0.5    # 面積比 (例: 0.5は1回統合、0.25は2回統合)
+    L = 2       # 階調段階数 (例: FMNISTでよく使われる)
+    PI = 0.25    # 面積比 (例: 0.5は1回統合、0.25は2回統合)
     BATCH_SIZE = 128
     OUTDIR = DATA_PATH+"CWALDP"
     os.makedirs(OUTDIR, exist_ok=True)

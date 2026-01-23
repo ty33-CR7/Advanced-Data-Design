@@ -142,10 +142,10 @@ def ep_to_f(ep: float, h: int):
 def main():
     global bf_time, perm_time, instant_time, global_rng, D
     ap = argparse.ArgumentParser()
-    ap.add_argument("--k", type=int, required=True)
-    ap.add_argument("--h", type=int, required=True)
-    ap.add_argument("--ep", type=float, default=0.0)
-    ap.add_argument("--n", type=int, default=0)
+    ap.add_argument("--k", type=int, required=True,help="bloomfiter length")
+    ap.add_argument("--h", type=int, required=True,help="the number of hash function")
+    ap.add_argument("--ep", type=float, default=0.0,help="rate of false positive")
+    ap.add_argument("--n", type=int, default=0,help="the number of neighbor ")
     ap.add_argument("--bfonly", action="store_true")
     ap.add_argument("--permonly", action="store_true")
     ap.add_argument("--npzfile", type=str, default="")
@@ -153,7 +153,7 @@ def main():
     ap.add_argument("--f", type=float, default=0.5)
     ap.add_argument("--q", type=float, default=0.75)
     ap.add_argument("--p", type=float, default=0.5)
-    ap.add_argument("--outdir", type=str, default="./data/FashionMNIST/BF/")
+    ap.add_argument("--outdir", type=str, default="../../data/FashionMNIST/Rappor/")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--label_cluster", type=int, default=0, help="0: no label RR, 1/8/10/13: cluster-based scaling")
     ap.add_argument("--label_ep", type=float, default=0.0, help="base epsilon for label RR")

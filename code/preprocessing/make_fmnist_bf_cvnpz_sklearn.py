@@ -101,7 +101,6 @@ def main():
     ap.add_argument("--neighbors", type=int, required=True)
     ap.add_argument("--noise_p", type=float, default=0.0, help="ノイズ反転確率 (0.0〜1.0)")
     ap.add_argument("--hash_number",type=int,default=None)#指定しない場合は、最適値がFPから計算される
-    ap.add_argument("--splits", type=int, default=10)
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--out", type=str, default=None)
@@ -124,19 +123,19 @@ def main():
     m = X.shape[1]*(2*args.neighbors+1)
    
     if args.hash_number!=None:
-        k=args.hash_number
-        l= ceil(m*k/log(2))
+        hash_number=args.hash_number
+        bf_length= ceil(m*hash_number/log(2))
     else:
-        l, k = compute_lk(args.fp, m)
+        bf_length, hash_number = compute_lk(args.fp, m)
         
-    print(f"[INFO] fp={args.fp}, n={args.neighbors}, l={l}, k={k}, noise_p={args.noise_p},hash_number={k}")
-    a=encode_sample(X[0], args.neighbors, k, l, args.noise_p)
-    X_bits = run_parallel(X, args, k, l)
+    print(f"[INFO] fp={args.fp}, n={args.neighbors}, l={bf_length}, hash_number={hash_number}, noise_p={args.noise_p}")
+    a=encode_sample(X[0], args.neighbors, hash_number, bf_length, args.noise_p)
+    X_bits = run_parallel(X, args, hash_number, bf_length)
 
 
-    meta = dict(fp=args.fp, neighbors=args.neighbors, noise_p=args.noise_p, l=l, k=k, splits=args.splits)
+    meta = dict(fp=args.fp, neighbors=args.neighbors, noise_p=args.noise_p, l=bf_length, k=hash_number)
     suffix = f"_NOISE{args.noise_p}" if args.noise_p > 0 else "_NOISE0"
-    out_name = args.out or f"./data/FashionMNIST/BF/fmnist_bf_cv{args.splits}_fp{args.fp}_n{args.neighbors}{suffix}_k{k}.npz"
+    out_name = args.out or f"../../data/FashionMNIST/BF/fmnist_bf_cv_fp{args.fp}_n{args.neighbors}{suffix}_k{hash_number}.npz"
     elapsed = time.time() - start_time
     print(f"[SAVED] {out_name} ({elapsed:.1f}s)")
     os.makedirs(os.path.dirname(out_name),exist_ok=True)
@@ -151,8 +150,8 @@ def main():
         "neighbors": args.neighbors,
         "noise_p": args.noise_p,
         "samples": len(X),
-        "bits": l,
-        "hashes": k,
+        "bits": bf_length,
+        "hashes": hash_number,
         "elapsed_time_sec": round(elapsed, 2)
     }])
     df.to_csv("bf_generation_time.csv", index=False)
