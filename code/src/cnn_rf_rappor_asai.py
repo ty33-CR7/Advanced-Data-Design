@@ -5,7 +5,7 @@ import pandas as pd
 import sklearn
 from sklearn.metrics import f1_score, accuracy_score
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier # 追加
+from sklearn.ensemble import RandomForestClassifier
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
@@ -56,15 +56,14 @@ def build_cnn_model_1d(n_features, n_classes=10, depth=2):
     return model
 
 def build_rf_model(seed=42):
-    """画像で指定されたパラメータに基づくRFモデル構築"""
     return RandomForestClassifier(
-        n_estimators=380,         # 決定木モデルの本数
-        max_depth=30,             # 決定木の最大深さ
-        min_samples_split=3,      # 分割に必要な最小サンプル数
-        min_samples_leaf=1,       # 葉ノードの最小サンプル数
-        max_features='sqrt',      # 分割時に使用する特徴量数 (√特徴量数)
+        n_estimators=380,
+        max_depth=30,
+        min_samples_split=3,
+        min_samples_leaf=1,
+        max_features='sqrt',
         random_state=seed,
-        n_jobs=-1                 # 並列処理による高速化
+        n_jobs=-1
     )
 
 def get_process_memory_mb():
@@ -77,6 +76,9 @@ def get_process_memory_mb():
         return float("nan")
     
 def get_fold_npz_list(fold_npz_dir):
+    if not os.path.exists(fold_npz_dir):
+        raise FileNotFoundError(f"Input directory not found: {fold_npz_dir}")
+
     files = [
         os.path.join(fold_npz_dir, f)
         for f in os.listdir(fold_npz_dir)
@@ -84,7 +86,7 @@ def get_fold_npz_list(fold_npz_dir):
     ]
     files = sorted(files)
     if len(files) != 10:
-        raise ValueError(f"{fold_npz_dir} has only {len(files)} npz files.")
+        raise ValueError(f"{fold_npz_dir} has only {len(files)} npz files. Expected 10.")
     return files
 
 def compute_label_epsilon(base_epsilon, label_cluster):
@@ -139,11 +141,10 @@ def ep_to_f(ep: float, h: int):
     f = 2 / (1 + math.exp(ep/(2*h)))
     return f
 
-# 名前を変更: run_10fold_cnn -> run_10fold_cv
 def run_10fold_cv(
     fold_npz_dir,
-    out_csv,
-    model_type="cnn", # 追加
+    output_dir,
+    model_type="cnn",
     epochs=10,
     batch_size=256,
     cnn_depth=2,
@@ -151,13 +152,13 @@ def run_10fold_cv(
     label_cluster=0,
     label_ep=0.0,
     ep=0.0,
+    seed=42, # 追加: seedを受け取る
     val_split=0.2,
     init_weights=None,
 ):
     fold_paths = get_fold_npz_list(fold_npz_dir)
     first = np.load(fold_paths[0], allow_pickle=True)
     n_features = first["X"].shape[1]
-    k_val = json.loads(first["meta_json"].item()).get("k")
     h = int(json.loads(first["meta_json"].item()).get("h"))
     first.close()
     
@@ -165,18 +166,23 @@ def run_10fold_cv(
     print(f"[INFO] Found 10 folds in: {fold_npz_dir}")
     print(f"[INFO] Feature length: {n_features}")
     
-    # CSV準備
     prefix = f"{model_type}_" if model_type == "rf" else f"cnndepth{cnn_depth}_"
-    out = os.path.join(fold_npz_dir, f"{prefix}{out_csv}")
+    out_filename = f"{prefix}result.csv"
+    out = os.path.join(output_dir, out_filename)
+    
+    print(f"[INFO] Output CSV will be saved to: {out}")
     
     if os.path.exists(out):
         raise FileExistsError(f"This file exists: {out}")
     
+    # ヘッダー修正: ep, seedを追加し、f1系を削除
+    header = ["fold","depth","epochs","batch_size","ep","seed","epoch","train_loss","train_acc","val_loss","val_acc","elapsed_sec","memory_mb","tts_test_loss","tts_test_acc","uts_test_loss","uts_test_acc"]
+    
     with open(out, "w", encoding="utf-8", newline="") as f_csv:
         writer = csv.writer(f_csv)
-        writer.writerow(["fold","depth","epochs","batch_size","epoch","train_loss","train_acc","val_loss","val_acc","elapsed_sec","memory_mb","tts_test_loss","tts_test_acc","tts_test_f1_macro","uts_test_loss","uts_test_acc","uts_test_f1_macro"])
+        writer.writerow(header)
 
-    mean_t_acc, mean_t_f1, mean_u_acc, mean_u_f1, mean_time, mean_mem = [], [], [], [], [], []
+    mean_t_acc, mean_u_acc, mean_time, mean_mem = [], [], [], []
 
     for fold_id, test_path in enumerate(fold_paths):
         print(f"=== Fold {fold_id} ===")
@@ -195,7 +201,7 @@ def run_10fold_cv(
         
         X_tr, X_val, y_tr, y_val = train_test_split(X_tr, y_tr, test_size=val_split, random_state=fold_id, stratify=y_tr)
         
-        # Noise process (共通)
+        # Noise process
         if ep > 0.0:
             if label_cluster > 0:
                 y_tr = grr_array(y_tr, compute_label_epsilon(label_ep, label_cluster), list(range(10))).astype(np.int64)
@@ -213,7 +219,7 @@ def run_10fold_cv(
             X_tr_proc, X_val_proc, X_te_tts = X_tr, X_val, X_te
             X_te_uts = permanent_response(X_te, ep_to_f(ep, h), n_features) if ep > 0.0 else X_te.copy()
 
-        # モデル構築・学習
+        # 学習
         start_time = time.perf_counter()
         if model_type == "cnn":
             model = build_cnn_model_1d(n_features, depth=cnn_depth)
@@ -224,7 +230,6 @@ def run_10fold_cv(
         else: # rf
             model = build_rf_model(seed=fold_id)
             model.fit(X_tr_proc, y_tr)
-            # epoch=1 用のダミーヒストリ
             hist = {
                 "loss": [0.0], "accuracy": [model.score(X_tr_proc, y_tr)],
                 "val_loss": [0.0], "val_accuracy": [model.score(X_val_proc, y_val)]
@@ -233,9 +238,9 @@ def run_10fold_cv(
         # 評価
         if model_type == "cnn":
             tts_te_loss, tts_te_acc = model.evaluate(X_te_tts, y_te, verbose=0)
-            tts_y_pred = np.argmax(model.predict(X_te_tts, verbose=0), axis=1)
+            # tts_y_pred = np.argmax(model.predict(X_te_tts, verbose=0), axis=1) # F1不要のため削除
             uts_te_loss, uts_te_acc = model.evaluate(X_te_uts, y_te, verbose=0)
-            uts_y_pred = np.argmax(model.predict(X_te_uts, verbose=0), axis=1)
+            # uts_y_pred = np.argmax(model.predict(X_te_uts, verbose=0), axis=1) # F1不要のため削除
         else: # rf
             tts_y_pred = model.predict(X_te_tts)
             tts_te_acc = accuracy_score(y_te, tts_y_pred)
@@ -244,32 +249,35 @@ def run_10fold_cv(
             uts_te_acc = accuracy_score(y_te, uts_y_pred)
             uts_te_loss = 0.0
 
-        tts_te_f1 = f1_score(y_te, tts_y_pred, average="macro")
-        uts_te_f1 = f1_score(y_te, uts_y_pred, average="macro")
+        # F1計算を削除
         
         elapsed_sec = time.perf_counter() - start_time
         mem_mb = get_process_memory_mb()
-        mean_t_acc.append(tts_te_acc); mean_t_f1.append(tts_te_f1); mean_u_acc.append(uts_te_acc); mean_u_f1.append(uts_te_f1); mean_time.append(elapsed_sec); mean_mem.append(mem_mb)
+        mean_t_acc.append(tts_te_acc); mean_u_acc.append(uts_te_acc); mean_time.append(elapsed_sec); mean_mem.append(mem_mb)
 
-        # CSV記録 (histの内容に応じてループ。RFなら1回)
         with open(out, "a", encoding="utf-8", newline="") as f_csv:
             writer = csv.writer(f_csv)
             for e in range(len(hist["loss"])):
-                writer.writerow([fold_id, cnn_depth if model_type=="cnn" else "RF", epochs, batch_size, e + 1, f"{hist['loss'][e]:.6f}", f"{hist['accuracy'][e]:.6f}", f"{hist['val_loss'][e]:.6f}", f"{hist['val_accuracy'][e]:.6f}", f"{elapsed_sec:.3f}", f"{mem_mb:.3f}", "", "", "", "", "", ""])
-            writer.writerow([f"{fold_id}_test", cnn_depth if model_type=="cnn" else "RF", epochs, batch_size, "", "", "", "", "", f"{elapsed_sec:.3f}", f"{mem_mb:.3f}", f"{tts_te_loss:.6f}", f"{tts_te_acc:.6f}", f"{tts_te_f1:.6f}", f"{uts_te_loss:.6f}", f"{uts_te_acc:.6f}", f"{uts_te_f1:.6f}"])
+                # epoch行: ep, seedを追加
+                writer.writerow([fold_id, cnn_depth if model_type=="cnn" else "RF", epochs, batch_size, ep, seed, e + 1, f"{hist['loss'][e]:.6f}", f"{hist['accuracy'][e]:.6f}", f"{hist['val_loss'][e]:.6f}", f"{hist['val_accuracy'][e]:.6f}", f"{elapsed_sec:.3f}", f"{mem_mb:.3f}", "", "", "", ""])
+            
+            # _test行: ep, seedを追加し、F1を削除
+            writer.writerow([f"{fold_id}_test", cnn_depth if model_type=="cnn" else "RF", epochs, batch_size, ep, seed, "", "", "", "", "", f"{elapsed_sec:.3f}", f"{mem_mb:.3f}", f"{tts_te_loss:.6f}", f"{tts_te_acc:.6f}", f"{uts_te_loss:.6f}", f"{uts_te_acc:.6f}"])
 
     with open(out, "a", encoding="utf-8", newline="") as f_csv:
         writer = csv.writer(f_csv)
-        writer.writerow(["mean", cnn_depth if model_type=="cnn" else "RF", "", "", "", "", "", "", "", f"{statistics.mean(mean_time):.3f}", f"{statistics.mean(mean_mem):.3f}", "", f"{statistics.mean(mean_t_acc):.6f}", f"{statistics.mean(mean_t_f1):.6f}", "", f"{statistics.mean(mean_u_acc):.6f}", f"{statistics.mean(mean_u_f1):.6f}"])
+        # mean行: ep, seedを追加し、F1を削除
+        writer.writerow(["mean", cnn_depth if model_type=="cnn" else "RF", "", "", ep, seed, "", "", "", "", "", f"{statistics.mean(mean_time):.3f}", f"{statistics.mean(mean_mem):.3f}", "", f"{statistics.mean(mean_t_acc):.6f}", "", f"{statistics.mean(mean_u_acc):.6f}"])
 
-def main():
+def main(): # python cnn_rf_rappor_asai.py --PI 1 --L 256 --model_type "rf" --ep 1 --seed 1
     global global_rng
     ap = argparse.ArgumentParser()
-    ap.add_argument("--npz_path", type=str, required=True)
-    ap.add_argument("--out_csv", type=str, required=True)
-    ap.add_argument("--model_type", type=str, default="cnn", choices=["cnn", "rf"], help="モデルの選択") # 追加
+    ap.add_argument("--PI", type=float, required=True, help="Privacy parameter PI")
+    ap.add_argument("--L", type=int, required=True, help="Parameter L")
+    
+    ap.add_argument("--model_type", type=str, default="cnn", choices=["cnn", "rf"], help="モデルの選択")
     ap.add_argument("--cnn_depth", type=int, default=2)
-    ap.add_argument("--test_noise", action="store_true")
+    ap.add_argument("--test_noise", action="store_true") # 使ってないが互換性のため残すなら残す、消すなら消す
     ap.add_argument("--label_cluster", type=int, default=0)
     ap.add_argument("--label_ep", type=float, default=0.0)
     ap.add_argument("--ep", type=float, default=0.0)
@@ -279,17 +287,28 @@ def main():
     ap.add_argument("--init_weights", type=str, default=None)
     args = ap.parse_args()
     
+    PI = args.PI
+    L = args.L
+    
+    input_dir = f"../../data/FashionMNIST/rappor/CWA/PI{PI}_L{L}"
+    result_dir = f"../../results/FashionMNIST/rappor/CWA/PI{PI}_L{L}/ep{args.ep}_nseed{args.seed}"
+    
+    print(f"[INFO] Loading dataset from {input_dir}...")
+    
+    os.makedirs(result_dir, exist_ok=True)
+    
     global_rng = np.random.default_rng(args.seed)
     
     run_10fold_cv(
-        fold_npz_dir=args.npz_path,
-        out_csv=args.out_csv,
-        model_type=args.model_type, # 追加
+        fold_npz_dir=input_dir,
+        output_dir=result_dir,
+        model_type=args.model_type,
         cnn_depth=args.cnn_depth,
         test_noise=args.test_noise,
         label_cluster=args.label_cluster,
         label_ep=args.label_ep,
         ep=args.ep,
+        seed=args.seed, # 追加: seedを渡す
         epochs=args.epochs,
         val_split=args.val_split,
         init_weights=args.init_weights,
