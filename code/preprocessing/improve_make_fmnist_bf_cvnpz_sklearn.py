@@ -145,7 +145,7 @@ def main():
     X_bits = run_parallel(X, args, hash_number, bf_length)
     meta = dict(fp=args.fp, neighbors=args.neighbors, noise_p=args.noise_p, bf_length=bf_length, hash_number=hash_number)
     suffix = f"_NOISE{args.noise_p}" if args.noise_p > 0 else "_NOISE0"
-    out_name = args.out or f"../../data/FashionMNIST/BF/fmnist_zw_fp{args.fp}_n{args.neighbors}_bf_length{bf_legnth}_k{hash_number}_PI{PI}_L{L}.npz"
+    out_name = args.out or f"../../data/FashionMNIST/BF/fmnist_zw_fp{args.fp}_n{args.neighbors}_bf_length{bf_length}_k{hash_number}_PI{PI}_L{L}.npz"
     elapsed = time.time() - start_time
     print(f"[SAVED] {out_name} ({elapsed:.1f}s)")
     os.makedirs(os.path.dirname(out_name),exist_ok=True)
