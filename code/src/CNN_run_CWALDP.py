@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
-from tqdm import tqdm
 import csv, os, time, platform, datetime
 import sklearn
 import json
@@ -479,7 +478,7 @@ def train_model(X_train_noise,X_test_noise,X_test,y_train_reshaped,y_test,model_
         # -------------------------- # 学習 # -------------------------- 
         history = model.fit( X_train_noise_reshaped, y_train_reshaped, # 変数名を調整 
                             validation_split=0.2, 
-                            epochs=30, 
+                            epochs=50, 
                             batch_size=256, 
                             callbacks=[early_stop,lr_schedule], 
                             verbose=1 # 訓練中の出力を抑制し、最後にまとめて計測する場合 
@@ -662,9 +661,12 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
     model_summary_str = ""
     # tone reduction domain (整数リスト)
     L_values = create_L_domain(L)
+    #PI=1の時はクラスタリングしない
         # information about which pixels belong to which cluster.
-    clusters = create_cluster(pixel, cluster_num)
-
+    if PI!=1:
+        clusters = create_cluster(pixel, cluster_num)
+    else:
+        clusters=[]
     epsilon_for_onecluster = epsilon/(cluster_num-1) #ラベルノイズを無視しているため、クラスターが一つ減る。 
 
     timing_records = []
@@ -741,23 +743,23 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
 
 if __name__ == "__main__":
     data="FashionMNIST"
-    seeds = [1, 2, 3]
-    epsilons=[1,2,3]
+    seeds = [1,2,3]
+    epsilons=[1.5]
     #(14*14,4,10,0),(14*14,4,13,0)(14*14,2,10,2),(14*14,2,13,2),(14*14,2,10,0),(14*14,2,13,0),(14*14,4,10,2),(14*14,4,13,2),
-    params = [(0.5,4,10,0),(0.5,4,10,0)]
+    params = [(0.25,4,8,2)]
     model="model2"
-    for unique_dataset in [False]:
-        for PI, L,cluster_num,label_epsilon in params:
-            for eps in epsilons:  
-                if data=="FashionMNIST":
-                  if unique_dataset:
-                      IDX_DIR = os.path.join("../../", f"data/{data}/CWALDP/unique_img/fmnist_full_L{L}_PI{PI}")
-                      input_path = f"../../data/{data}/CWALDP/unique_img/fmnist_full_L{L}_PI{PI}/cleaned_fmnist_L{L}_PI{PI}.npz"
-                  else:
-                      IDX_DIR = os.path.join("../../", f"split_indices_full_gray/{data}")     
-                      input_path = f"../../data/{data}/CWALDP/fmnist_full_L{L}_PI{PI}.npz"
-                # 現在日時を取得し、YYYYMMDD-HHMMSS形式の文字列を生成
-                timestamp = datetime.datetime.now().strftime("%Y%m%d")
-                output_path = f"../../experiments/{data}/CWALDP/CNN/{timestamp}/{unique_dataset}_unique_RR_waldp_L{L}_PI{PI}_C{cluster_num}_eps{eps}_label_noise_{label_epsilon}_{model}.csv"
-            
-                waldp_time(input_path, output_path, eps, PI, L,cluster_num, seeds,label_epsilon,data,model,IDX_DIR)
+    for eps in epsilons:  
+        for unique_dataset in [False]:
+            for PI, L,cluster_num,label_epsilon in params:
+                    if data=="FashionMNIST":
+                        if unique_dataset:
+                            IDX_DIR = os.path.join("../../", f"data/{data}/CWALDP/unique_img/fmnist_full_L{L}_PI{PI}")
+                            input_path = f"../../data/{data}/CWALDP/unique_img/fmnist_full_L{L}_PI{PI}/cleaned_fmnist_L{L}_PI{PI}.npz"
+                        else:
+                            IDX_DIR = os.path.join("../../", f"split_indices_full_gray/{data}")     
+                            input_path = f"../../data/{data}/CWALDP/fmnist_full_L{L}_PI{PI}.npz"
+                        # 現在日時を取得し、YYYYMMDD-HHMMSS形式の文字列を生成
+                        timestamp = datetime.datetime.now().strftime("%Y%m%d")
+                        output_path = f"../../experiments/{data}/CWALDP/CNN/{timestamp}/{unique_dataset}_unique_RR_waldp_L{L}_PI{PI}_C{cluster_num}_eps{eps}_label_noise_{label_epsilon}_{model}.csv"
+                    
+                        waldp_time(input_path, output_path, eps, PI, L,cluster_num, seeds,label_epsilon,data,model,IDX_DIR)

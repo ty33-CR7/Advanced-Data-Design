@@ -331,7 +331,6 @@ def create_cluster(P, cluster_num):
                 for j in range(4,12):
                     cluster.append((i,j))
                 clusters.append(flat(cluster, P))
-
             return clusters
     else:
             raise ValueError("クラスタリングが定義されていません")
@@ -619,7 +618,7 @@ def plot_learning_curves(history, test_loss, test_acc,test_noise_loss, test_nois
 
     # Train / Val のライン
     ax2.plot(epochs, acc, 'bo-', label=f'Train: {train_acc:.4f}')
-    ax2.plot(epochs, val_acc, 'r*-', label=f'Val:   {val_acc:.4f}')
+    ax2.plot(epochs, val_acc, 'r*-', label=f'Val:   {val_acc[-1]:.4f}')
     
     # Test のポイント (最終エポックの位置に緑の星)
     ax2.plot(last_epoch, test_acc, 'g*', markersize=15, label=f'Test:  {test_acc:.4f}')
@@ -627,9 +626,9 @@ def plot_learning_curves(history, test_loss, test_acc,test_noise_loss, test_nois
     ax2.plot(last_epoch, train_acc, 'k*', markersize=15, label=f'Train:  {train_acc:.4f}')
 
     # Gapの可視化
-    acc_gap = train_acc - val_acc 
-    mid_acc = (train_acc + val_acc) / 2
-    ax2.vlines(last_epoch, train_acc, val_acc, colors='gray', linestyles='dashed', alpha=0.5)
+    acc_gap = train_acc - val_acc[-1]
+    mid_acc = (train_acc + val_acc[-1]) / 2
+    ax2.vlines(last_epoch, train_acc, val_acc[-1], colors='gray', linestyles='dashed', alpha=0.5)
     ax2.annotate(f'Gap: {acc_gap:.4f}', 
                  xy=(last_epoch, mid_acc), 
                  xytext=(last_epoch - 1, mid_acc),
@@ -647,8 +646,8 @@ def plot_learning_curves(history, test_loss, test_acc,test_noise_loss, test_nois
     
     # コンソール出力
     print(f"=== {model_name} Final Metrics ===")
-    print(f"Loss     | Train: {train_loss:.4f}, Val: {val_loss:.4f}, Test: {test_loss:.4f},Test_noise: {test_noise_loss:.4f}")
-    print(f"Accuracy | Train: {train_acc:.4f}, Val: {val_acc:.4f}, Test: {test_acc:.4f},Test_noise: {test_noise_acc:.4f}")
+    print(f"Loss     | Train: {train_loss:.4f}, Val: {val_loss[-1]:.4f}, Test: {test_loss:.4f},Test_noise: {test_noise_loss:.4f}")
+    print(f"Accuracy | Train: {train_acc:.4f}, Val: {val_acc[-1]:.4f}, Test: {test_acc:.4f},Test_noise: {test_noise_acc:.4f}")
     
     plt.savefig(output_path)
     
@@ -692,21 +691,25 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
     #画素数の計算
     pixel=int(X_all.shape[1])
     epsilon=pixel*epsilon_per_pixel
-
-
+    
     timing_records = []
     model_summary_str = ""
     # tone reduction domain (整数リスト)
     L_values = create_L_domain(L)
         # information about which pixels belong to which cluster.
-    clusters = create_cluster(pixel, cluster_num)
+    
+    if PI!=1:
+        clusters = create_cluster(pixel, cluster_num)
+    else:
+        clusters=[]
     # get the domain of tones.
     L_values = create_L_domain(L)
     epsilon_for_onecluster = epsilon/(cluster_num-1) # budget for each cluster
 
     timing_records = []
     X_train,X_test,y_train,y_test=train_test_split(X_all,y_all,test_size=0.2,random_state=42)
-
+    
+    
     # ---- Train noise ----
     X_train_noise = X_train.copy()
     for cluster in clusters:
@@ -747,7 +750,7 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
 if __name__ == "__main__":
     data="FashionMNIST"
     epsilons=[0]
-    params = [(0.5,4,10,0),(0.5,4,13,0)]
+    params = [(1,256,10,0),(0.5,4,10,0),(0.25,4,10,0)]
     model="model2"
     seed=1
     for PI, L,cluster_num,label_epsilon in params:
