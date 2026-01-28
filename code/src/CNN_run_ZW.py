@@ -8,11 +8,6 @@ import math
 import tensorflow as tf
 import argparse
 
-"""
-DropoutOFFでのtrain0.8/val0.2精度をhistoryで出力するようになっています
-trainでの最終精度（last_stats,DropoutOFF）はデータ全体1.0での精度になってます（CNN_run_CWALDPと合わせたはず）
-"""
-
 # ---- ログ保存用のカスタムコールバック ----
 class DropoutOffHistory(tf.keras.callbacks.Callback):
     """
@@ -190,7 +185,7 @@ def train_fmnist(X_train_noise, X_test_noise, y_train_reshaped, y_test):
     lr_schedule = tf.keras.callbacks.LearningRateScheduler(scheduler)
     
     # カスタムコールバック：Dropout OFFでのTrain精度計測用
-    # ここには分割した X_train_sub を渡す（Valは含まない）
+    # 学習中のログ用には分割した X_train_sub を使う
     history_logger = DropoutOffHistory(X_train_sub, y_train_sub)
 
     print("Starting training...")
@@ -205,13 +200,17 @@ def train_fmnist(X_train_noise, X_test_noise, y_train_reshaped, y_test):
     
     # EarlyStoppingでrestoreされた場合、history_loggerの最後がベストとは限らないが、
     # 復元された重み（ベスト状態）を使って再度Train/Valのスコアを計算して返すのが最も確実
-    print("Evaluating restored best model on Train/Val subsets (Dropout OFF)...")
-    final_tr_loss, final_tr_acc = model.evaluate(X_train_sub, y_train_sub, verbose=0)
+    print("Evaluating restored best model on FULL Train data (Dropout OFF)...")
+    
+    # ★★★ ここを修正 ★★★
+    # X_train_sub (0.8) ではなく X_train_full (1.0) を使用して評価
+    final_tr_loss, final_tr_acc = model.evaluate(X_train_full, y_train_reshaped, verbose=0)
+    
     final_val_loss, final_val_acc = model.evaluate(X_val, y_val, verbose=0)
     
     last_stats = {
         "stopped_epoch": len(history_logger.history_records), # 実際に回ったエポック数
-        "train_acc": final_tr_acc,
+        "train_acc": final_tr_acc, # 全データに対する精度
         "val_acc": final_val_acc
     }
 
@@ -369,7 +368,7 @@ if __name__ == "__main__":
 
     # 固定パラメータ
     seeds = [1]
-    params = [(0.4, 2, 1)]
+    params = [(0.4, 3, 1)]
 
     
     # -------------------------------------------------------------
@@ -389,7 +388,7 @@ if __name__ == "__main__":
         raise ValueError(f"Unknown dataset '{args.data}'")
 
     for fp, neighbors, hash_number in params:
-        for eps in [0]:
+        for eps in [0,1]:
             
             # 入力ファイルパス
             original_path = os.path.join(
