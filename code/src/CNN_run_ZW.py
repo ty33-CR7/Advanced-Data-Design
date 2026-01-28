@@ -8,6 +8,12 @@ import math
 import tensorflow as tf
 import argparse
 
+"""
+DropoutOFFでのtrain0.8/val0.2精度をhistoryで出力するようになっています
+trainでの最善精度（last_stats,DropoutOFF）はtrain+valデータ全体1.0での精度になってます（CNN_run_CWALDPと合わせたはず）
+TTSとUTSもとってます
+"""
+
 # ---- ログ保存用のカスタムコールバック ----
 class DropoutOffHistory(tf.keras.callbacks.Callback):
     """
