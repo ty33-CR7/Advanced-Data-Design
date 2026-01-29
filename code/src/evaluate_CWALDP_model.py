@@ -585,7 +585,7 @@ def plot_learning_curves(history, test_loss, test_acc,test_noise_loss, test_nois
     # ==========================================
     # 1. Loss のプロット (左側)
     # ==========================================
-    final_train_loss = loss[-1]
+    final_train_loss = train_loss
     final_val_loss = val_loss[-1]
     
     # Train / Val のライン
@@ -615,11 +615,12 @@ def plot_learning_curves(history, test_loss, test_acc,test_noise_loss, test_nois
     # ==========================================
     # 2. Accuracy のプロット (右側)
     # ==========================================
- 
+    final_train_acc = train_acc
+    final_val_acc = val_acc[-1]
 
     # Train / Val のライン
-    ax2.plot(epochs, acc, 'bo-', label=f'Train: {train_acc:.4f}')
-    ax2.plot(epochs, val_acc, 'r*-', label=f'Val:   {val_acc:.4f}')
+    ax2.plot(epochs, acc, 'bo-', label=f'Train: {final_train_acc:.4f}')
+    ax2.plot(epochs, val_acc, 'r*-', label=f'Val:   {final_val_acc:.4f}')
     
     # Test のポイント (最終エポックの位置に緑の星)
     ax2.plot(last_epoch, test_acc, 'g*', markersize=15, label=f'Test:  {test_acc:.4f}')
@@ -627,9 +628,9 @@ def plot_learning_curves(history, test_loss, test_acc,test_noise_loss, test_nois
     ax2.plot(last_epoch, train_acc, 'k*', markersize=15, label=f'Train:  {train_acc:.4f}')
 
     # Gapの可視化
-    acc_gap = train_acc - val_acc 
-    mid_acc = (train_acc + val_acc) / 2
-    ax2.vlines(last_epoch, train_acc, val_acc, colors='gray', linestyles='dashed', alpha=0.5)
+    acc_gap = final_train_acc - final_val_acc 
+    mid_acc = (final_train_acc + final_val_acc) / 2
+    ax2.vlines(last_epoch, final_train_acc, final_val_acc, colors='gray', linestyles='dashed', alpha=0.5)
     ax2.annotate(f'Gap: {acc_gap:.4f}', 
                  xy=(last_epoch, mid_acc), 
                  xytext=(last_epoch - 1, mid_acc),
@@ -647,11 +648,10 @@ def plot_learning_curves(history, test_loss, test_acc,test_noise_loss, test_nois
     
     # コンソール出力
     print(f"=== {model_name} Final Metrics ===")
-    print(f"Loss     | Train: {train_loss:.4f}, Val: {val_loss:.4f}, Test: {test_loss:.4f},Test_noise: {test_noise_loss:.4f}")
-    print(f"Accuracy | Train: {train_acc:.4f}, Val: {val_acc:.4f}, Test: {test_acc:.4f},Test_noise: {test_noise_acc:.4f}")
+    print(f"Loss     | Train: {final_train_loss:.4f}, Val: {final_val_loss:.4f}, Test: {test_loss:.4f},Test_noise: {test_noise_loss:.4f}")
+    print(f"Accuracy | Train: {final_train_acc:.4f}, Val: {final_val_acc:.4f}, Test: {test_acc:.4f},Test_noise: {test_noise_acc:.4f}")
     
     plt.savefig(output_path)
-    
 
 
 

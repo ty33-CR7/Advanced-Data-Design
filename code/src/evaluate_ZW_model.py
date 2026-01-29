@@ -173,7 +173,7 @@ def plot_learning_curves(history, test_loss, test_acc,test_noise_loss, test_nois
     # ==========================================
     # 1. Loss のプロット (左側)
     # ==========================================
-    final_train_loss = loss[-1]
+    final_train_loss = train_loss
     final_val_loss = val_loss[-1]
     
     # Train / Val のライン
@@ -203,7 +203,7 @@ def plot_learning_curves(history, test_loss, test_acc,test_noise_loss, test_nois
     # ==========================================
     # 2. Accuracy のプロット (右側)
     # ==========================================
-    final_train_acc = acc[-1]
+    final_train_acc = train_acc
     final_val_acc = val_acc[-1]
 
     # Train / Val のライン
