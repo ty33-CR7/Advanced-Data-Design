@@ -1,6 +1,5 @@
 import pandas as pd
 import numpy as np
-# from sklearn.model_selection import train_test_split # 不要になったため削除
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 import csv, os, time, platform, datetime
@@ -8,7 +7,7 @@ import json
 import math
 import argparse
 
-# ---- Helper Functions (データ生成・メタデータ関連は維持) ----
+# ---- Helper Functions ----
 
 def calculate_best_2d_shape(L):
     if L <= 0: return (0, 0)
@@ -62,11 +61,11 @@ def output_time_result(records, filename):
     file_exists = os.path.exists(filename)
     write_header = not file_exists
     
-    # カラム定義修正：stopped_epoch, val_acc 等を削除
+    # 修正: UTSとTTSを別カラムとして1行にまとめる
     columns = [
         "epsilon", "noise_p", "k", "seed", "fold",
         "time_sec", 
-        "train_acc", "test_acc"
+        "train_acc", "uts_acc", "tts_acc"
     ]
 
     with open(filename, mode="a", encoding="utf-8", newline="") as f:
@@ -81,9 +80,11 @@ def output_time_result(records, filename):
 
         for r in records:
             row = {k: r.get(k, "") for k in columns}
+            # フォーマット調整
             if isinstance(row["time_sec"], float): row["time_sec"] = f"{row['time_sec']:.6f}"
             if isinstance(row["train_acc"], float): row["train_acc"] = f"{row['train_acc']:.4f}"
-            if isinstance(row["test_acc"], float): row["test_acc"] = f"{row['test_acc']:.4f}"
+            if isinstance(row["uts_acc"], float): row["uts_acc"] = f"{row['uts_acc']:.4f}"
+            if isinstance(row["tts_acc"], float): row["tts_acc"] = f"{row['tts_acc']:.4f}"
             writer.writerow(row)
 
     print(f"Results appended to {filename}")
@@ -101,7 +102,6 @@ def train_rf(X_train, y_train, seed):
         clf: 学習済みモデル
         train_acc: 学習データに対する精度
     """
-    # 指定された設定でRFを初期化
     clf = RandomForestClassifier(
         n_estimators=380,
         max_depth=30,
@@ -112,10 +112,8 @@ def train_rf(X_train, y_train, seed):
         n_jobs=-1
     )
     
-    # 学習実行
     clf.fit(X_train, y_train)
     
-    # 学習データに対する精度計測（過学習チェック用）
     y_pred_train = clf.predict(X_train)
     train_acc = accuracy_score(y_train, y_pred_train)
     
@@ -132,14 +130,8 @@ def waldp_time(original_path, base_output_path, epsilon, noise_p, hash_number, s
     meta = json.loads(dat["meta_json"].item())
     l = meta["l"]
     print(f"BF_length: {l}, Data loaded.")
-
-    # 出力ファイルパスの生成
-    path_root, ext = os.path.splitext(base_output_path)
-    csv_path_uts = f"{path_root}_UTS{ext}"
-    csv_path_tts = f"{path_root}_TTS{ext}"
     
-    uts_records = []
-    tts_records = []
+    records = []
 
     for fid in range(1, 11):
         val_idx = np.load(os.path.join(IDX_DIR, f"fold_{fid}.npy"))
@@ -153,7 +145,7 @@ def waldp_time(original_path, base_output_path, epsilon, noise_p, hash_number, s
             # 1. データの準備
             # ---------------------------------------------------------
             
-            # A) ノイズありデータ作成
+            # A) ノイズありデータ作成 (UTS & Train)
             X_noisy_packed = [
                 add_flip_noise_packed(X_bits[i], l, noise_p, i, seed)
                 for i in range(len(X_bits))
@@ -161,13 +153,12 @@ def waldp_time(original_path, base_output_path, epsilon, noise_p, hash_number, s
             X_noisy = np.array([np.unpackbits(x)[:l] for x in X_noisy_packed], dtype=np.uint8)
             X_noisy = np.int8((2 * X_noisy) - 1)
 
-            # RFは2次元入力を受け付けるため reshape(-1, n, 1) は不要
             X_train_noise = X_noisy[train_idx]
             X_test_noise  = X_noisy[val_idx] # UTS
             y_train = y[train_idx]
             y_test  = y[val_idx]
 
-            # B) ノイズなしデータ作成
+            # B) ノイズなしデータ作成 (TTS)
             X_clean_packed = X_bits[val_idx]
             X_clean = np.array([np.unpackbits(x)[:l] for x in X_clean_packed], dtype=np.uint8)
             X_test_clean = np.int8((2 * X_clean) - 1) # TTS
@@ -185,7 +176,6 @@ def waldp_time(original_path, base_output_path, epsilon, noise_p, hash_number, s
             # ---------------------------------------------------------
             ts = time.perf_counter_ns()
             
-            # RF学習
             model, train_acc = train_rf(X_train_noise, y_train_reshaped, seed)
             
             te = time.perf_counter_ns()
@@ -211,7 +201,8 @@ def waldp_time(original_path, base_output_path, epsilon, noise_p, hash_number, s
             # 4. 記録
             # ---------------------------------------------------------
             
-            base_record = {
+            # UTSとTTSを同じレコードに入れる
+            record = {
                 'epsilon': float(epsilon),
                 'noise_p': float(noise_p),
                 'k': hash_number,
@@ -219,21 +210,13 @@ def waldp_time(original_path, base_output_path, epsilon, noise_p, hash_number, s
                 'fold': int(fid),
                 'time_sec': float(elapsed_sec),
                 'train_acc': float(train_acc),
+                'uts_acc': float(acc_uts),
+                'tts_acc': float(acc_tts)
             }
+            records.append(record)
 
-            # UTS用レコード
-            r_uts = base_record.copy()
-            r_uts['test_acc'] = float(acc_uts)
-            uts_records.append(r_uts)
-
-            # TTS用レコード
-            r_tts = base_record.copy()
-            r_tts['test_acc'] = float(acc_tts)
-            tts_records.append(r_tts)
-
-    # CSV一括出力
-    output_time_result(uts_records, csv_path_uts)
-    output_time_result(tts_records, csv_path_tts)
+    # CSV出力 (1ファイルにまとめる)
+    output_time_result(records, base_output_path)
 
 
 if __name__ == "__main__":
@@ -275,10 +258,10 @@ if __name__ == "__main__":
             noise_p = 1 / (1 + math.exp(eps / (2 * hash_number)))
             if eps == 0: noise_p = 0
 
-            subdir = "UTS_test_Labels" if test_noise else "Clean_test_Labels"
+            subdir = "RF_Results" # 分ける必要がないのでディレクトリ名も変更しても良いかもですが、任意です
             
-            # RF用に出力ファイル名を変えたい場合はここで変更可能ですが、
-            # 依頼の通りディレクトリ構造は維持しています。
+            # 出力ファイル名生成
+            # _UTS, _TTS の区別なく単一ファイルに出力
             output_path = os.path.join(
                 BASE, 
                 f"../../results/{args.data}/ZW+24/CWA/PI{PI}_L{L}/{subdir}/BF_fp{fp}_n{neighbors}_dmax{dmax}_eps{eps}_k{hash_number}_noise{noise_p}.csv"
