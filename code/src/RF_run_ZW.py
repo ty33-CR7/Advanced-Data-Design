@@ -224,14 +224,14 @@ if __name__ == "__main__":
     ap.add_argument("--data", type=str, default = "FashionMNIST")
     ap.add_argument("--PI", type=float, required=True)
     ap.add_argument("--L", type=int, required=True)
-    ap.add_argument("--d_max_percent", type=float, default=0.1) 
+    # ap.add_argument("--d_max_percent", type=float, default=0.1) # CWAとの関係で、未使用
     
     args = ap.parse_args()
 
     PI = args.PI
     L = args.L
-    if PI.is_integer(): PI = int(PI)
-    dmax = 255 * args.d_max_percent
+    if PI.is_integer(): int_PI = int(PI) # ファイルパス次第
+    # dmax = 255 * args.d_max_percent  # CWAとの関係で、未使用
 
     # 固定パラメータ
     seeds = [1]
@@ -248,11 +248,12 @@ if __name__ == "__main__":
         raise ValueError(f"Unknown dataset '{args.data}'")
 
     for fp, neighbors, hash_number in params:
-        for eps in [0,1]:
+        for eps in [0,0.5,1,1.5]:
             
             original_path = os.path.join(
                 BASE, 
-                f"../../data/FashionMNIST/ZW+24/CWA/all/PI{PI}/L{L}/fmnist_bf_cv10_fp{fp}_n{neighbors}_dmax{dmax}_NOISE0_k{hash_number}.npz"
+                f"../../data/FashionMNIST/ZW+24/CWA/all/PI{PI}/L{L}/improve_fmnist_bf_cv10_fp{fp}_n{neighbors}_NOISE0_k{hash_number}_PI{PI}_L{L}.npz"
+                
             )
 
             noise_p = 1 / (1 + math.exp(eps / (2 * hash_number)))
@@ -264,7 +265,8 @@ if __name__ == "__main__":
             # _UTS, _TTS の区別なく単一ファイルに出力
             output_path = os.path.join(
                 BASE, 
-                f"../../results/{args.data}/ZW+24/CWA/PI{PI}_L{L}/{subdir}/BF_fp{fp}_n{neighbors}_dmax{dmax}_eps{eps}_k{hash_number}_noise{noise_p}.csv"
+                f"../../results/{args.data}/ZW+24/CWA/PI{int_PI}_L{L}/{subdir}/BF_fp{fp}_n{neighbors}_eps{eps}_k{hash_number}_noise{noise_p}_PI{int_PI}_L{L}.csv"
+                
             )
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             
