@@ -300,7 +300,7 @@ def flat(idx_tuple_list, P):
         return flat_idx_list
 
 
-def train_model(X_train_noise,X_test_noise,X_test,y_train_reshaped,y_test,model_selection):
+def train_model(X_train_noise,X_test_noise,X_test,y_train_noise_reshaped,y_train,y_test,model_selection):
         # データの全長 (BFの長さ) を取得
         edge_size=int(math.sqrt(X_train_noise.shape[1]))
         H, W = edge_size,edge_size
@@ -476,7 +476,7 @@ def train_model(X_train_noise,X_test_noise,X_test,y_train_reshaped,y_test,model_
             return lr 
         lr_schedule = tf.keras.callbacks.LearningRateScheduler(scheduler) 
         # -------------------------- # 学習 # -------------------------- 
-        history = model.fit( X_train_noise_reshaped, y_train_reshaped, # 変数名を調整 
+        history = model.fit( X_train_noise_reshaped, y_train_noise_reshaped, # 変数名を調整 
                             validation_split=0.2, 
                             epochs=50, 
                             batch_size=256, 
@@ -496,12 +496,13 @@ def train_model(X_train_noise,X_test_noise,X_test,y_train_reshaped,y_test,model_
         # model.evaluateは推論と同時に損失と精度を計算する
         test_noise_loss, test_noise_acc = model.evaluate(X_test_noise_reshaped, y_test, verbose=0) # 変数名を調整
         test_loss, test_acc = model.evaluate(X_test_reshaped, y_test, verbose=0) # 変数名を調整
-        train_loss, train_acc = model.evaluate(X_train_noise_reshaped,y_train_reshaped, verbose=0)
+        train_loss, train_acc = model.evaluate(X_train_noise_reshaped,y_train_noise_reshaped, verbose=0)
+        train_loss_no_noise, train_acc_no_noise = model.evaluate(X_train_noise_reshaped,y_train, verbose=0)
         # --- 【ここを追加】メモリ解放処理 ---
         del model       # Pythonのオブジェクトを削除
         tf.keras.backend.clear_session()  # TensorFlowのバックエンドメモリを解放
         gc.collect()    # Pythonのガベージコレクションを強制実行
-        return test_loss,test_acc,test_noise_loss,test_noise_acc, train_loss, train_acc,model_summary
+        return test_loss,test_acc,test_noise_loss,test_noise_acc, train_loss, train_acc,train_loss_no_noise, train_acc_no_noise ,model_summary
             
 
 def output_result(data, filename):
@@ -573,8 +574,8 @@ def output_time_result(records, filename, model_summary=""):
                 writer.writerow([
                     "P", "L", "epsilon", "seed", "fold",
                     "time_sec",
-                    "test_loss", "test_noise_loss", "train_loss",
-                    "test_accuracy", "test_noise_accuracy", "train_accuracy"
+                    "test_loss", "test_noise_loss", "train_loss","train_loss_no_noise",
+                    "test_accuracy", "test_noise_accuracy", "train_accuracy","train_accuracy_no_noise"
                 ])
 
             for r in records:
@@ -590,10 +591,12 @@ def output_time_result(records, filename, model_summary=""):
                     f"{r.get('test_loss', 0):.4f}",
                     f"{r.get('test_noise_loss', 0):.4f}",
                     f"{r.get('train_loss', 0):.4f}",
+                    f"{r.get('train_loss_no_noise', 0):.4f}",
                     # Accuracy関係
                     f"{r.get('test_accuracy', 0):.4f}",
                     f"{r.get('test_noise_accuracy', 0):.4f}",
-                    f"{r.get('train_accuracy', 0):.4f}"
+                    f"{r.get('train_accuracy', 0):.4f}",
+                     f"{r.get('train_accuracy_no_noise', 0):.4f}"
                 ])
 
     print(f"Add timing results to CSV file {filename} (rows added: {len(records)})")
@@ -614,7 +617,7 @@ from sklearn.metrics import accuracy_score
 
 
 
-def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,seed,label_epsilon,data,model,IDX_DIR):
+def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,seed,label_epsilon,data,model_name,IDX_DIR):
     """
     Measure training/inference time of RandomForest on GRR-perturbed WA datasets.
 
@@ -706,7 +709,7 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
             ts = time.perf_counter_ns()
             
 
-            test_loss,test_acc,test_noise_loss,test_noise_acc, train_loss, train_acc,current_summary = train_model(X_train_noise,X_test_noised,X_test,y_train_noise,y_test,model)
+            test_loss,test_acc,test_noise_loss,test_noise_acc, train_loss, train_acc,train_loss_no_noise, train_acc_no_noise ,current_summary = train_model(X_train_noise,X_test_noised,X_test,y_train_noise,y_train,y_test,model_name)
             # 初回または更新が必要な場合にサマリーを保存
             if not model_summary_str:
                  model_summary_str = current_summary
@@ -728,9 +731,11 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
                 'test_loss': float(test_loss),
                 'test_noise_loss': float(test_noise_loss),
                 'train_loss': float(train_loss),
+                'train_loss_no_noise': float(train_loss_no_noise),
                 'test_accuracy': float(test_acc),
                 'test_noise_accuracy': float(test_noise_acc),
                 'train_accuracy': float(train_acc),
+                'train_accuracy_no_noise': float(train_acc_no_noise),
             })
 
 
@@ -744,9 +749,9 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
 if __name__ == "__main__":
     data="FashionMNIST"
     seeds = [1,2,3]
-    epsilons=[1.5]
+    epsilons=[0.5,1.5]
     #(14*14,4,10,0),(14*14,4,13,0)(14*14,2,10,2),(14*14,2,13,2),(14*14,2,10,0),(14*14,2,13,0),(14*14,4,10,2),(14*14,4,13,2),
-    params = [(0.25,4,8,2)]
+    params = [(0.5,4,10,2),(0.5,4,13,2)]
     model="model2"
     for eps in epsilons:  
         for unique_dataset in [False]:
