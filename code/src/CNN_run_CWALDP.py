@@ -505,43 +505,6 @@ def train_model(X_train_noise,X_test_noise,X_test,y_train_noise_reshaped,y_train
         return test_loss,test_acc,test_noise_loss,test_noise_acc, train_loss, train_acc,train_loss_no_noise, train_acc_no_noise ,model_summary
             
 
-def output_result(data, filename):
-    """
-    add results to disignated file.
-    """
-    file_exists = os.path.exists(filename)  
-
-    # CSVファイルに追記
-    with open(filename, mode="a", encoding="utf-8", newline="") as file:
-        writer = csv.writer(file)
-
-        if not file_exists:
-            writer.writerow(["P", "L", "epsilon", "accuracy"])
-
-        # データ行を書く
-        for key, value in data.items():
-            writer.writerow([*key, value])
-
-    print(f"Add results to CSV file {filename}")
-
-def _collect_env_metadata():
-    return {
-        "timestamp_utc": datetime.datetime.utcnow().isoformat() + "Z",
-        "python_version": platform.python_version(),
-        "os": f"{platform.system()} {platform.release()} ({platform.version()})",
-        "machine": platform.machine(),
-        "processor": platform.processor(),
-        "cpu_count": os.cpu_count(),
-        "numpy": np.__version__,
-        "pandas": pd.__version__,
-        "sklearn": sklearn.__version__,
-    }
-
-import os, csv
-
-import os
-import csv
-
 def output_time_result(records, filename, model_summary=""):
     """
     Write timing measurement records to CSV.
