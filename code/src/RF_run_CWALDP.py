@@ -15,7 +15,7 @@ def train_RF(X_train_noise,X_test_noise,X_test,y_train_noise_reshaped,y_train,y_
     RandomForestClassifierを用いて学習と評価を行う
     """
     # 1. モデルの定義 (パラメータは必要に応じて調整してください)
-    model = RandomForestClassifier(n_estimators=30,max_depth=30,min_samples_split=3,min_samples_leaf=1,max_features="sqrt")
+    model = RandomForestClassifier(n_estimators=380,max_depth=30,min_samples_split=3,min_samples_leaf=1,max_features="sqrt")
 
     # 2. 学習
     # RandomForestは(samples, pixels)の2次元配列をそのまま受け取れます
