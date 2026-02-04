@@ -1,0 +1,46 @@
+{
+  "dataset": "MNIST",
+  "total_items": 70000,
+  "train_items": 60000,
+  "test_items": 10000,
+  "class_names": [
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9"
+  ],
+  "labels_distribution_full": {
+    "0": 6903,
+    "1": 7877,
+    "2": 6990,
+    "3": 7141,
+    "4": 6824,
+    "5": 6313,
+    "6": 6876,
+    "7": 7293,
+    "8": 6825,
+    "9": 6958
+  },
+  "k_folds": 10,
+  "seed": 42,
+  "shuffle": true,
+  "index_order_note": "Indices are for concatenated dataset [train(60k) then test(10k)].",
+  "files": [
+    "fold_1.npy",
+    "fold_2.npy",
+    "fold_3.npy",
+    "fold_4.npy",
+    "fold_5.npy",
+    "fold_6.npy",
+    "fold_7.npy",
+    "fold_8.npy",
+    "fold_9.npy",
+    "fold_10.npy"
+  ]
+}
