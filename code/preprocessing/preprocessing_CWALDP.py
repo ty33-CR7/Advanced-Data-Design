@@ -88,7 +88,7 @@ def exe_discretize(X, L):
 
 def main():
     # --- モード選択 ---
-    dataset_mode = "FashionMNIST" # 実行したいデータセットに変更してください
+    dataset_mode = "MNIST" # 実行したいデータセットに変更してください
     DATA_PATH=f"../../data/{dataset_mode}/"
     L = 4     # 階調段階数 (例: FMNISTでよく使われる)
     PI = 0.5    # 面積比 (例: 0.5は1回統合、0.25は2回統合)
@@ -107,7 +107,7 @@ def main():
         # 修正: FullDataset クラスを使用
         dataset = FullDataset(train_raw, test_raw, transform=transform, is_fmnist=False)
         prefix = "cifar"
-    else: # FMNIST
+    elif dataset_mode=="FashionMNIST": # FMNIST
         print("Processing FashionMNIST...")
         transform = transforms.Compose([transforms.ToTensor()])
         train_raw = datasets.FashionMNIST(root=DATA_PATH+"raw", train=True, download=True)
@@ -115,7 +115,15 @@ def main():
         # 修正: FullDataset クラスを使用
         dataset = FullDataset(train_raw, test_raw, transform=transform, is_fmnist=True)
         prefix = "fmnist"
-
+    elif dataset_mode=="MNIST":
+        print("Processing MNIST...")
+        transform = transforms.Compose([transforms.ToTensor()])
+        train_raw = datasets.MNIST(root=DATA_PATH+"raw", train=True, download=True)
+        test_raw  = datasets.MNIST(root=DATA_PATH+"raw", train=False, download=True)
+        # 修正: FullDataset クラスを使用
+        dataset = FullDataset(train_raw, test_raw, transform=transform, is_fmnist=True)
+        prefix = "mnist"
+        
     full_loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False)
     X_all_0_1, y_all = dataloader_to_arrays(full_loader) # X_all_0_1 は 0.0〜1.0 スケール
     
