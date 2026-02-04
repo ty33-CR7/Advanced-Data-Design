@@ -109,14 +109,6 @@ def grr_array(values, eps, domain, seed):
     # たとえば WA で [0, 255] を L 分割して代表値に丸めている前提なら、
     # その代表値集合をここで作る。既にXがその値だけを取るなら単純に unique でもOK。
     # ここでは等間隔代表値を再構成（必要に応じて置き換えてください）。
-def create_L_domain(L):
-    # 代表値を 0..255 の中点で L 個（Xがその集合にある設計前提）
-    rng = np.linspace(0, 255, L+1)
-    mids = (rng[:-1] + rng[1:]) / 2.0
-    return mids.astype(np.float32)
-
-
-
 
 def create_L_domain(L):
     """
@@ -539,62 +531,83 @@ def train_model(X_train_noise,X_test_noise,X_test,y_train_noise_reshaped,y_train
 
 def output_time_result(records, filename, model_summary=""):
     """
-    Write timing measurement records to CSV.
-    Each record contains keys matching the new dictionary structure:
-      P, L, epsilon, seed, fold, time_sec,
-      test_loss, test_noise_loss, train_loss,
-      test_accuracy, test_noise_accuracy, train_accuracy
+    Write timing measurement records to CSV and append an average row.
     """
     file_exists = os.path.exists(filename)
     write_header = not file_exists
 
     with open(filename, mode="a", encoding="utf-8", newline="") as f:
-            if write_header:
-                # 環境メタデータの書き込み（必要であれば関数を呼び出す）
-                # meta = _collect_env_metadata()
-                # for k, v in meta.items():
-                #     f.write(f"# {k}: {v}\n")
-                
-                # --- モデルの概要をコメントとして追加 ---
-                if model_summary:
-                    f.write("# Model Summary:\n")
-                    for line in model_summary.splitlines():
-                        f.write(f"# {line}\n")
-                # ----------------------------------------
+        if write_header:
+            if model_summary:
+                f.write("# Model Summary:\n")
+                for line in model_summary.splitlines():
+                    f.write(f"# {line}\n")
 
-            writer = csv.writer(f)
+        writer = csv.writer(f)
+        
+        headers = [
+            "P", "L", "epsilon", "seed", "fold",
+            "time_sec",
+            "test_loss", "test_noise_loss", "train_loss", "train_loss_no_noise",
+            "test_accuracy", "test_noise_accuracy", "train_accuracy", "train_accuracy_no_noise"
+        ]
+
+        if write_header:
+            writer.writerow(headers)
+
+        # 1. 各行のデータを書き込みながら、平均計算用の合計値を保持する
+        num_records = len(records)
+        # 数値計算が必要なカラムのインデックス（time_sec以降）
+        numeric_indices = range(5, len(headers)) 
+        sums = {i: 0.0 for i in numeric_indices}
+
+        for r in records:
+            row = [
+                r.get('P'),
+                r.get('L'),
+                r.get('epsilon'),
+                r.get('seed'),
+                r.get('fold'),
+                r.get('time_sec', 0),
+                r.get('test_loss', 0),
+                r.get('test_noise_loss', 0),
+                r.get('train_loss', 0),
+                r.get('train_loss_no_noise', 0),
+                r.get('test_accuracy', 0),
+                r.get('test_noise_accuracy', 0),
+                r.get('train_accuracy', 0),
+                r.get('train_accuracy_no_noise', 0)
+            ]
             
-            # ★ 修正: ヘッダーを新しい辞書のキーに合わせて更新
-            if write_header:
-                writer.writerow([
-                    "P", "L", "epsilon", "seed", "fold",
-                    "time_sec",
-                    "test_loss", "test_noise_loss", "train_loss","train_loss_no_noise",
-                    "test_accuracy", "test_noise_accuracy", "train_accuracy","train_accuracy_no_noise"
-                ])
+            # 数値データの加算
+            for i in numeric_indices:
+                sums[i] += float(row[i] if row[i] is not None else 0)
 
-            for r in records:
-                # ★ 修正: 新しい辞書のキーに合わせて値を取り出し
-                writer.writerow([
-                    r.get('P'),
-                    r.get('L'),
-                    r.get('epsilon'),
-                    r.get('seed'),
-                    r.get('fold'),
-                    f"{r.get('time_sec', 0):.9f}",
-                    # Loss関係
-                    f"{r.get('test_loss', 0):.4f}",
-                    f"{r.get('test_noise_loss', 0):.4f}",
-                    f"{r.get('train_loss', 0):.4f}",
-                    f"{r.get('train_loss_no_noise', 0):.4f}",
-                    # Accuracy関係
-                    f"{r.get('test_accuracy', 0):.4f}",
-                    f"{r.get('test_noise_accuracy', 0):.4f}",
-                    f"{r.get('train_accuracy', 0):.4f}",
-                     f"{r.get('train_accuracy_no_noise', 0):.4f}"
-                ])
+            # フォーマットを整えて書き込み
+            formatted_row = []
+            for i, val in enumerate(row):
+                if i == 5: # time_sec
+                    formatted_row.append(f"{val:.9f}")
+                elif i > 5: # losses & accuracies
+                    formatted_row.append(f"{val:.4f}")
+                else:
+                    formatted_row.append(val)
+            
+            writer.writerow(formatted_row)
 
-    print(f"Add timing results to CSV file {filename} (rows added: {len(records)})")
+        # 2. 平均行の作成と書き込み
+        if num_records > 0:
+            avg_row = ["Average", "", "", "", ""] # メタデータ列は空にするかラベルを入れる
+            for i in numeric_indices:
+                avg_val = sums[i] / num_records
+                if i == 5:
+                    avg_row.append(f"{avg_val:.9f}")
+                else:
+                    avg_row.append(f"{avg_val:.4f}")
+            
+            writer.writerow(avg_row)
+
+    print(f"Add timing results to CSV file {filename} (rows added: {len(records)} + 1 avg row)")
 
 
 # def load_config(config_path):
@@ -743,23 +756,24 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
 
 if __name__ == "__main__":
     data="FashionMNIST"
-    seeds = [1,2,3]
-    epsilons=[0.5,0.75,1]
+    seeds = [1]
+    epsilons=[0]
     #(14*14,4,10,0),(14*14,4,13,0)(14*14,2,10,2),(14*14,2,13,2),(14*14,2,10,0),(14*14,2,13,0),(14*14,4,10,2),(14*14,4,13,2),
-    params = [(0.5,4,10,0),(0.5,4,13,0)]
+    params = [(0.5,4,10,0)]
     model="Yagishita"
-    for eps in epsilons:  
-        for unique_dataset in [False]:
-            for PI, L,cluster_num,label_epsilon in params:
-                    if data=="FashionMNIST":
-                        if unique_dataset:
-                            IDX_DIR = os.path.join("../../", f"data/{data}/CWALDP/unique_img/fmnist_full_L{L}_PI{PI}")
-                            input_path = f"../../data/{data}/CWALDP/unique_img/fmnist_full_L{L}_PI{PI}/cleaned_fmnist_L{L}_PI{PI}.npz"
-                        else:
-                            IDX_DIR = os.path.join("../../", f"split_indices_full_gray/{data}")     
-                            input_path = f"../../data/{data}/CWALDP/fmnist_full_L{L}_PI{PI}.npz"
-                        # 現在日時を取得し、YYYYMMDD-HHMMSS形式の文字列を生成
-                        timestamp = datetime.datetime.now().strftime("%Y%m%d")
-                        output_path = f"../../experiments/{data}/CWALDP/CNN/{timestamp}/{unique_dataset}_unique_RR_waldp_L{L}_PI{PI}_C{cluster_num}_eps{eps}_label_noise_{label_epsilon}_{model}.csv"
-                    
-                        waldp_time(input_path, output_path, eps, PI, L,cluster_num, seeds,label_epsilon,data,model,IDX_DIR)
+    for model in ["Yagishita","model2"]:
+        for eps in epsilons:  
+            for unique_dataset in [False]:
+                for PI, L,cluster_num,label_epsilon in params:
+                        if data=="FashionMNIST":
+                            if unique_dataset:
+                                IDX_DIR = os.path.join("../../", f"data/{data}/CWALDP/unique_img/fmnist_full_L{L}_PI{PI}")
+                                input_path = f"../../data/{data}/CWALDP/unique_img/fmnist_full_L{L}_PI{PI}/cleaned_fmnist_L{L}_PI{PI}.npz"
+                            else:
+                                IDX_DIR = os.path.join("../../", f"split_indices_full_gray/{data}")     
+                                input_path = f"../../data/{data}/CWALDP/fmnist_full_L{L}_PI{PI}.npz"
+                            # 現在日時を取得し、YYYYMMDD-HHMMSS形式の文字列を生成
+                            timestamp = datetime.datetime.now().strftime("%Y%m%d")
+                            output_path = f"../../experiments/{data}/CWALDP/CNN/{timestamp}/CWALDP_L{L}_PI{PI}_C{cluster_num}_eps{eps}_label_noise_{label_epsilon}_{model}.csv"
+                        
+                            waldp_time(input_path, output_path, eps, PI, L,cluster_num, seeds,label_epsilon,data,model,IDX_DIR)

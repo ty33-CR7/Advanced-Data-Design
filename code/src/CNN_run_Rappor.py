@@ -100,59 +100,76 @@ def _collect_env_metadata():
 
 def output_time_result(records, filename, model_summary=""):
     """
-    Write timing measurement records to CSV.
-    Each record contains keys matching the new dictionary structure:
-      P, L, epsilon, seed, fold, time_sec,
-      test_loss, test_noise_loss, train_loss,
-      test_accuracy, test_noise_accuracy, train_accuracy
+    レコードをCSVに書き込み、最後に数値列の平均値を1行追加する。
     """
     file_exists = os.path.exists(filename)
     write_header = not file_exists
 
     with open(filename, mode="a", encoding="utf-8", newline="") as f:
-            if write_header:
-                # 環境メタデータの書き込み（必要であれば関数を呼び出す）
-                # meta = _collect_env_metadata()
-                # for k, v in meta.items():
-                #     f.write(f"# {k}: {v}\n")
-                
-                # --- モデルの概要をコメントとして追加 ---
-                if model_summary:
-                    f.write("# Model Summary:\n")
-                    for line in model_summary.splitlines():
-                        f.write(f"# {line}\n")
-                # ----------------------------------------
+        # ヘッダーやメタデータの書き込み
+        if write_header:
+            if model_summary:
+                f.write("# Model Summary:\n")
+                for line in model_summary.splitlines():
+                    f.write(f"# {line}\n")
 
-            writer = csv.writer(f)
+        writer = csv.writer(f)
+        
+        headers = [
+            "epsilon", "noise_p", "k", "seed", "fold",
+            "time_sec", "test_loss", "test_noise_loss", "train_loss",
+            "test_accuracy", "test_noise_accuracy", "train_accuracy"
+        ]
+
+        if write_header:
+            writer.writerow(headers)
+
+        # 平均計算用の変数を初期化 (数値列: インデックス5以降)
+        num_records = len(records)
+        numeric_sums = [0.0] * (len(headers) - 5)
+
+        for r in records:
+            # データの抽出
+            vals = [
+                r.get('epsilon', ''),
+                r.get('noise_p', ''),
+                r.get('k', ''),
+                r.get('seed', ''),
+                r.get('fold', ''),
+                r.get('time_sec', 0),
+                r.get('test_loss', 0),
+                r.get('test_noise_loss', 0),
+                r.get('train_loss', 0),
+                r.get('test_accuracy', 0),
+                r.get('test_noise_accuracy', 0),
+                r.get('train_accuracy', 0)
+            ]
+
+            # 数値データの合計を加算 (インデックス5: time_sec 以降)
+            for i, val in enumerate(vals[5:]):
+                numeric_sums[i] += float(val if val is not None else 0)
+
+            # 書式を整えて行を書き込み
+            formatted_row = vals[:5] + [
+                f"{vals[5]:.9f}",                   # time_sec
+                *[f"{v:.4f}" for v in vals[6:]]     # Loss / Accuracy
+            ]
+            writer.writerow(formatted_row)
+
+        # --- 平均行の追加 ---
+        if num_records > 0:
+            avg_row = ["Average", "", "", "", ""] # メタデータ列は空に
+            for s in numeric_sums:
+                avg_val = s / num_records
+                # 精度を元のデータと合わせる (time_secは9桁、他は4桁)
+                if len(avg_row) == 5:
+                    avg_row.append(f"{avg_val:.9f}")
+                else:
+                    avg_row.append(f"{avg_val:.4f}")
             
-            # ★ 修正: ヘッダーを新しい辞書のキーに合わせて更新
-            if write_header:
-                writer.writerow([
-                    "epsilon", "noise_p", "k", "seed", "fold",
-                    "time_sec","test_loss", "test_noise_loss", "train_loss",
-                    "test_accuracy", "test_noise_accuracy", "train_accuracy"
-                ])
+            writer.writerow(avg_row)
 
-            for r in records:
-                # ★ 修正: 新しい辞書のキーに合わせて値を取り出し
-                writer.writerow([
-                    r.get('epsilon', ''),
-                    r.get('noise_p', ''),
-                    r.get('k', ''),
-                    r.get('seed', ''),
-                    r.get('fold', ''),
-                    f"{r.get('time_sec', 0):.9f}",
-                    # Loss関係
-                    f"{r.get('test_loss', 0):.4f}",
-                    f"{r.get('test_noise_loss', 0):.4f}",
-                    f"{r.get('train_loss', 0):.4f}",
-                    # Accuracy関係
-                    f"{r.get('test_accuracy', 0):.4f}",
-                    f"{r.get('test_noise_accuracy', 0):.4f}",
-                    f"{r.get('train_accuracy', 0):.4f}"
-                ])
-
-    print(f"Add timing results to CSV file {filename} (rows added: {len(records)})")
+    print(f"Added results to {filename} (Rows: {num_records} + 1 Average row)")
 
 def train_model(X_train_noise,X_test_noise,X_test,y_train_reshaped,y_test,model_selection):
         n_features = X_train_noise.shape[1]
