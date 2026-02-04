@@ -57,11 +57,12 @@ def _collect_env_metadata():
         "numpy": np.__version__
     }
 
+
 def output_time_result(records, filename):
     file_exists = os.path.exists(filename)
     write_header = not file_exists
     
-    # 修正: UTSとTTSを別カラムとして1行にまとめる
+    # カラム定義
     columns = [
         "epsilon", "noise_p", "k", "seed", "fold",
         "time_sec", 
@@ -78,16 +79,38 @@ def output_time_result(records, filename):
         if write_header:
             writer.writeheader()
 
+        # 平均計算用の変数
+        num_records = len(records)
+        numeric_keys = ["time_sec", "train_acc", "uts_acc", "tts_acc"]
+        sums = {k: 0.0 for k in numeric_keys}
+
         for r in records:
             row = {k: r.get(k, "") for k in columns}
-            # フォーマット調整
-            if isinstance(row["time_sec"], float): row["time_sec"] = f"{row['time_sec']:.6f}"
-            if isinstance(row["train_acc"], float): row["train_acc"] = f"{row['train_acc']:.4f}"
-            if isinstance(row["uts_acc"], float): row["uts_acc"] = f"{row['uts_acc']:.4f}"
-            if isinstance(row["tts_acc"], float): row["tts_acc"] = f"{row['tts_acc']:.4f}"
+            
+            # 数値データの集計とフォーマット
+            for k in numeric_keys:
+                val = row[k]
+                if isinstance(val, (int, float)):
+                    sums[k] += float(val)
+                    # 書き込み用のフォーマット適用
+                    precision = ".6f" if k == "time_sec" else ".4f"
+                    row[k] = f"{float(val):{precision}}"
+            
             writer.writerow(row)
 
-    print(f"Results appended to {filename}")
+        # --- 平均行の追加 ---
+        if num_records > 0:
+            avg_row = {k: "" for k in columns}
+            avg_row["epsilon"] = "Average"  # 最初の列にラベル
+            
+            for k in numeric_keys:
+                avg_val = sums[k] / num_records
+                precision = ".6f" if k == "time_sec" else ".4f"
+                avg_row[k] = f"{avg_val:{precision}}"
+            
+            writer.writerow(avg_row)
+
+    print(f"Results (with Average) appended to {filename}")
 
 # ---- Model Training Function (Random Forest) ----
 
@@ -265,7 +288,7 @@ if __name__ == "__main__":
             # _UTS, _TTS の区別なく単一ファイルに出力
             output_path = os.path.join(
                 BASE, 
-                f"../../results/{args.data}/ZW+24/CWA/PI{int_PI}_L{L}/{subdir}/BF_fp{fp}_n{neighbors}_eps{eps}_k{hash_number}_noise{noise_p}_PI{int_PI}_L{L}.csv"
+                f"../../results/{args.data}/ZW+24/CWA/PI{int_PI}_L{L}/{subdir}/ZW_fp{fp}_n{neighbors}_eps{eps}_k{hash_number}_noise{noise_p}_PI{int_PI}_L{L}.csv"
                 
             )
             os.makedirs(os.path.dirname(output_path), exist_ok=True)

@@ -107,25 +107,57 @@ def output_time_result(records, filename):
 
     with open(filename, mode="a", encoding="utf-8", newline="") as f:
         if write_header:
-            meta = _collect_env_metadata()
-            for k, v in meta.items():
-                f.write(f"# {k}: {v}\n")
+            # meta = _collect_env_metadata() # 必要に応じて有効化
+            # for k, v in meta.items():
+            #     f.write(f"# {k}: {v}\n")
+            pass
         
         writer = csv.DictWriter(f, fieldnames=columns)
         if write_header:
             writer.writeheader()
 
-        for r in records:
-            # 辞書から必要なキーだけを取り出して書き込む（安全策）
-            row = {k: r.get(k, "") for k in columns}
-            # 数値のフォーマット調整
-            if isinstance(row["time_sec"], float): row["time_sec"] = f"{row['time_sec']:.6f}"
-            if isinstance(row["train_acc"], float): row["train_acc"] = f"{row['train_acc']:.4f}"
-            if isinstance(row["val_acc"], float): row["val_acc"] = f"{row['val_acc']:.4f}"
-            if isinstance(row["test_acc"], float): row["test_acc"] = f"{row['test_acc']:.4f}"
-            writer.writerow(row)
+        # 平均計算用の集計辞書
+        num_records = len(records)
+        # 数値計算したいキーのリスト
+        numeric_keys = ["stopped_epoch", "time_sec", "train_acc", "val_acc", "test_acc"]
+        sums = {k: 0.0 for k in numeric_keys}
 
-    print(f"Results appended to {filename}")
+        for r in records:
+            # 1. データの抽出と集計
+            row = {k: r.get(k, "") for k in columns}
+            
+            for k in numeric_keys:
+                try:
+                    sums[k] += float(row[k]) if row[k] != "" else 0
+                except (ValueError, TypeError):
+                    pass
+
+            # 2. 数値のフォーマット調整（書き込み用）
+            formatted_row = row.copy()
+            if isinstance(row["time_sec"], (int, float)): formatted_row["time_sec"] = f"{float(row['time_sec']):.6f}"
+            if isinstance(row["train_acc"], (int, float)): formatted_row["train_acc"] = f"{float(row['train_acc']):.4f}"
+            if isinstance(row["val_acc"], (int, float)): formatted_row["val_acc"] = f"{float(row['val_acc']):.4f}"
+            if isinstance(row["test_acc"], (int, float)): formatted_row["test_acc"] = f"{float(row['test_acc']):.4f}"
+            
+            writer.writerow(formatted_row)
+
+        # 3. 平均行の追加
+        if num_records > 0:
+            avg_row = {k: "" for k in columns}
+            avg_row["epsilon"] = "Average"  # ラベルを最初の列に配置
+            
+            for k in numeric_keys:
+                avg_val = sums[k] / num_records
+                if k == "time_sec":
+                    avg_row[k] = f"{avg_val:.6f}"
+                elif k == "stopped_epoch":
+                    avg_row[k] = f"{avg_val:.2f}" # epochは小数点2位くらいが見やすい
+                else:
+                    avg_row[k] = f"{avg_val:.4f}"
+            
+            writer.writerow(avg_row)
+
+    print(f"Results (with Average) appended to {filename}")
 
 def output_history_json(history_records, filename):
     """学習曲線データ（エポックごとの詳細）をJSONで保存"""
@@ -411,7 +443,7 @@ if __name__ == "__main__":
             
             output_path = os.path.join(
                 BASE, 
-                f"../../results/{args.data}/ZW+24/CWA/PI{PI}_L{L}/{subdir}/BF_fp{fp}_n{neighbors}_eps{eps}_k{hash_number}_noise{noise_p}_PI{PI}_L{L}.csv"
+                f"../../results/{args.data}/ZW+24/CWA/PI{PI}_L{L}/{subdir}/ZW_fp{fp}_n{neighbors}_eps{eps}_k{hash_number}_noise{noise_p}_PI{PI}_L{L}.csv"
             )
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             

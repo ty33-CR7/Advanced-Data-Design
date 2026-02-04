@@ -35,61 +35,81 @@ def train_RF(X_train_noise,X_test_noise,X_test,y_train_noise_reshaped,y_train,y_
 
 
 
+
+
 def output_time_result(records, filename, model_summary=""):
     """
-    Write timing measurement records to CSV.
-    Each record contains keys matching the new dictionary structure:
-      P, L, epsilon, seed, fold, time_sec,
-      test_loss, test_noise_loss, train_loss,
-      test_accuracy, test_noise_accuracy, train_accuracy
+    数値データの平均行を末尾に追加してCSVに書き込む。
     """
     file_exists = os.path.exists(filename)
     write_header = not file_exists
 
     with open(filename, mode="a", encoding="utf-8", newline="") as f:
-            if write_header:
-                # 環境メタデータの書き込み（必要であれば関数を呼び出す）
-                # meta = _collect_env_metadata()
-                # for k, v in meta.items():
-                #     f.write(f"# {k}: {v}\n")
-                
-                # --- モデルの概要をコメントとして追加 ---
-                if model_summary:
-                    f.write("# Model Summary:\n")
-                    for line in model_summary.splitlines():
-                        f.write(f"# {line}\n")
-                # ----------------------------------------
+        if write_header:
+            if model_summary:
+                f.write("# Model Summary:\n")
+                for line in model_summary.splitlines():
+                    f.write(f"# {line}\n")
 
-            writer = csv.writer(f)
+        writer = csv.writer(f)
+        
+        if write_header:
+            writer.writerow([
+                "P", "L", "epsilon", "seed", "fold",
+                "time_sec",
+                "test_accuracy", "test_noise_accuracy", "train_accuracy", "train_accuracy_no_noise"
+            ])
+
+        # 平均計算用の集計変数（数値列: インデックス5以降）
+        num_records = len(records)
+        # 合計値を保持するリスト [time_sec, test_acc, test_noise_acc, train_acc, train_acc_no_noise]
+        numeric_sums = [0.0] * 5 
+
+        for r in records:
+            # データの取得
+            row_data = [
+                r.get('P'),
+                r.get('L'),
+                r.get('epsilon'),
+                r.get('seed'),
+                r.get('fold'),
+                r.get('time_sec', 0),
+                r.get('test_accuracy', 0),
+                r.get('test_noise_accuracy', 0),
+                r.get('train_accuracy', 0),
+                r.get('train_accuracy_no_noise', 0)
+            ]
+
+            # インデックス5以降（time_secから最後）を数値として加算
+            for i in range(5):
+                val = row_data[i + 5]
+                numeric_sums[i] += float(val if val is not None else 0)
+
+            # フォーマットを整えて書き込み
+            writer.writerow([
+                *row_data[:5],
+                f"{row_data[5]:.9f}", # time_sec
+                *[f"{v:.4f}" for v in row_data[6:]] # Accuracies
+            ])
+
+        # --- 平均行の追加 ---
+        if num_records > 0:
+            # Pの列に "Average" と入れ、他のメタデータ列は空欄にする
+            avg_row = ["Average", "", "", "", ""]
             
-            # ★ 修正: ヘッダーを新しい辞書のキーに合わせて更新
-            if write_header:
-                writer.writerow([
-                    "P", "L", "epsilon", "seed", "fold",
-                    "time_sec",
-                    "test_accuracy", "test_noise_accuracy", "train_accuracy","train_accuracy_no_noise"
-                ])
+            # 平均値を計算して追加
+            for i, s in enumerate(numeric_sums):
+                avg_val = s / num_records
+                if i == 0: # time_sec
+                    avg_row.append(f"{avg_val:.9f}")
+                else: # Accuracies
+                    avg_row.append(f"{avg_val:.4f}")
+            
+            writer.writerow(avg_row)
 
-            for r in records:
-                # ★ 修正: 新しい辞書のキーに合わせて値を取り出し
-                writer.writerow([
-                    r.get('P'),
-                    r.get('L'),
-                    r.get('epsilon'),
-                    r.get('seed'),
-                    r.get('fold'),
-                    f"{r.get('time_sec', 0):.9f}",
-                    # Accuracy関係
-                    f"{r.get('test_accuracy', 0):.4f}",
-                    f"{r.get('test_noise_accuracy', 0):.4f}",
-                    f"{r.get('train_accuracy', 0):.4f}",
-                     f"{r.get('train_accuracy_no_noise', 0):.4f}"
-                ])
-
-    print(f"Add timing results to CSV file {filename} (rows added: {len(records)})")
-
-
-
+    print(f"Add timing results to CSV file {filename} (rows added: {len(records)} + 1 average row)")
+    
+    
 def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,seed,label_epsilon,IDX_DIR):
     """
     Measure training/inference time of RandomForest on GRR-perturbed WA datasets.
@@ -216,6 +236,6 @@ if __name__ == "__main__":
                             input_path = f"../../data/{data}/CWALDP/fmnist_full_L{L}_PI{PI}.npz"
                         # 現在日時を取得し、YYYYMMDD-HHMMSS形式の文字列を生成
                         timestamp = datetime.datetime.now().strftime("%Y%m%d")
-                        output_path = f"../../experiments/{data}/CWALDP/RF/{timestamp}/{unique_dataset}_unique_RR_waldp_L{L}_PI{PI}_C{cluster_num}_eps{eps}_label_noise_{label_epsilon}.csv"
+                        output_path = f"../../experiments/{data}/CWALDP/RF/{timestamp}/CWALDP_L{L}_PI{PI}_C{cluster_num}_eps{eps}_label_noise_{label_epsilon}.csv"
                     
                         waldp_time(input_path, output_path, eps, PI, L,cluster_num, seeds,label_epsilon,IDX_DIR)
