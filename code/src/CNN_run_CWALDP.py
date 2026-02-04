@@ -462,6 +462,38 @@ def train_model(X_train_noise,X_test_noise,X_test,y_train_noise_reshaped,y_train
                 # ========================================
                 tf.keras.layers.Dense(10, activation='softmax')
             ])
+        elif model_selection=="Yagishita":
+            model = tf.keras.models.Sequential([
+                    # --- 第1畳み込み層ブロック ---
+                    tf.keras.layers.Conv2D(16, kernel_size=3, padding='same', input_shape=input_shape),
+                    tf.keras.layers.BatchNormalization(),
+                    tf.keras.layers.Activation('relu'),
+                    tf.keras.layers.MaxPooling2D(pool_size=2, strides=2),
+
+                    # --- 第2畳み込み層ブロック ---
+                    tf.keras.layers.Conv2D(32, kernel_size=3, padding='same'),
+                    tf.keras.layers.BatchNormalization(),
+                    tf.keras.layers.Activation('relu'),
+                    tf.keras.layers.MaxPooling2D(pool_size=2, strides=2),
+
+                    # 全結合層へ渡すための平坦化
+                    tf.keras.layers.Flatten(),
+
+                    # --- 全結合層 1 ---
+                    # 画像内の 'n' は、Flatten後のユニット数に自動的に対応します
+                    tf.keras.layers.Dense(128),
+                    tf.keras.layers.Activation('relu'),
+                    tf.keras.layers.Dropout(0.25),
+
+                    # --- 全結合層 2 ---
+                    tf.keras.layers.Dense(64),
+                    tf.keras.layers.Activation('relu'),
+                    tf.keras.layers.Dropout(0.1),
+
+                    # --- 全結合層 3 (出力層) ---
+                    tf.keras.layers.Dense(10, activation='softmax') # 10クラス分類を想定
+                ])
+
 
         #tf.keras.layers.MaxPooling2D((2, 2)),
 
@@ -712,10 +744,10 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
 if __name__ == "__main__":
     data="FashionMNIST"
     seeds = [1,2,3]
-    epsilons=[0.5,1.5]
+    epsilons=[0.5,0.75,1]
     #(14*14,4,10,0),(14*14,4,13,0)(14*14,2,10,2),(14*14,2,13,2),(14*14,2,10,0),(14*14,2,13,0),(14*14,4,10,2),(14*14,4,13,2),
-    params = [(0.5,4,10,2),(0.5,4,13,2)]
-    model="model2"
+    params = [(0.5,4,10,0),(0.5,4,13,0)]
+    model="Yagishita"
     for eps in epsilons:  
         for unique_dataset in [False]:
             for PI, L,cluster_num,label_epsilon in params:

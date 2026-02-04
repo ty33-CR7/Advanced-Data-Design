@@ -523,7 +523,63 @@ def train_CIFAR10(X_train_noise,X_test_noise,X_test,y_train_reshaped,y_test,mode
             ])
         elif model_selection=="Resnet18":
             model=ResNet18_Custom(input_shape, classes=10)
+        
+        elif model_selection=="LeNet-5":
+            model = tf.keras.models.Sequential([
+                        # 第1層: 畳み込み層
+                        # 14x14 は小さいため、padding='same' で解像度を維持するか、
+                        # padding='valid' で少し削るか選択します（ここでは元論文に近いvalid）。
+                        tf.keras.layers.Conv2D(6, kernel_size=(3, 3), activation='relu', input_shape=input_shape),
+                        # 12x12 -> 6x6
+                        tf.keras.layers.MaxPooling2D(pool_size=(2, 2)),
 
+                        # 第2層: 畳み込み層
+                        tf.keras.layers.Conv2D(16, kernel_size=(3, 3), activation='relu'),
+                        # 4x4 -> 2x2
+                        tf.keras.layers.MaxPooling2D(pool_size=(2, 2)),
+
+                        # 平坦化（フラット化）
+                        tf.keras.layers.Flatten(),
+
+                        # 全結合層
+                        tf.keras.layers.Dense(120, activation='relu'),
+                        tf.keras.layers.Dense(84, activation='relu'),
+
+                        # 出力層
+                        tf.keras.layers.Dense(10, activation='softmax')
+                    ])
+        elif model_selection=="Yagishita":
+            model = tf.keras.models.Sequential([
+                    # --- 第1畳み込み層ブロック ---
+                    tf.keras.layers.Conv2D(16, kernel_size=3, padding='same', input_shape=input_shape),
+                    tf.keras.layers.BatchNormalization(),
+                    tf.keras.layers.Activation('relu'),
+                    tf.keras.layers.MaxPooling2D(pool_size=2, strides=2),
+
+                    # --- 第2畳み込み層ブロック ---
+                    tf.keras.layers.Conv2D(32, kernel_size=3, padding='same'),
+                    tf.keras.layers.BatchNormalization(),
+                    tf.keras.layers.Activation('relu'),
+                    tf.keras.layers.MaxPooling2D(pool_size=2, strides=2),
+
+                    # 全結合層へ渡すための平坦化
+                    tf.keras.layers.Flatten(),
+
+                    # --- 全結合層 1 ---
+                    # 画像内の 'n' は、Flatten後のユニット数に自動的に対応します
+                    tf.keras.layers.Dense(128),
+                    tf.keras.layers.Activation('relu'),
+                    tf.keras.layers.Dropout(0.25),
+
+                    # --- 全結合層 2 ---
+                    tf.keras.layers.Dense(64),
+                    tf.keras.layers.Activation('relu'),
+                    tf.keras.layers.Dropout(0.1),
+
+                    # --- 全結合層 3 (出力層) ---
+                    tf.keras.layers.Dense(10, activation='softmax') # 10クラス分類を想定
+                ])
+     
         #tf.keras.layers.MaxPooling2D((2, 2)),
 
         # --------------------------
@@ -544,7 +600,8 @@ def train_CIFAR10(X_train_noise,X_test_noise,X_test,y_train_reshaped,y_test,mode
                             callbacks=[early_stop, lr_schedule], 
                             verbose=1 # 訓練中の出力を抑制し、最後にまとめて計測する場合 
                             )
-        
+
+            
         # model.summary()が実行可能であることを確認
         stringlist = []
         # ★ 修正箇所: line_break=Falseなどの追加引数を吸収するため、**kwargs を追加
@@ -697,12 +754,14 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
     timing_records = []
     model_summary_str = ""
     # tone reduction domain (整数リスト)
-    L_values = create_L_domain(L)
-        # information about which pixels belong to which cluster.
-    clusters = create_cluster(pixel, cluster_num)
     # get the domain of tones.
     L_values = create_L_domain(L)
-    epsilon_for_onecluster = epsilon/(cluster_num-1) # budget for each cluster
+    
+    if PI!=1:
+        clusters = create_cluster(pixel, cluster_num)
+    else:
+        clusters=[]
+    epsilon_for_onecluster = epsilon/(cluster_num-1) #ラベルノイズを無視しているため、クラスターが一つ減る。
 
     timing_records = []
     X_train,X_test,y_train,y_test=train_test_split(X_all,y_all,test_size=0.2,random_state=42)
@@ -746,15 +805,15 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
 
 if __name__ == "__main__":
     data="FashionMNIST"
-    epsilons=[0]
-    params = [(0.5,4,10,0),(0.5,4,13,0)]
-    model="model2"
+    epsilons=[0.5,0.75]
+    params = [(0.5,4,10,0)]
     seed=1
-    for PI, L,cluster_num,label_epsilon in params:
-        for eps in epsilons:        
-            input_path = f"../../data/{data}/CWALDP/fmnist_full_L{L}_PI{PI}.npz"
-            # 現在日時を取得し、YYYYMMDD-HHMMSS形式の文字列を生成
-            timestamp = datetime.datetime.now().strftime("%Y%m%d")
-            output_path = f"../../experiments/{data}/CWALDP/CNN/{timestamp}/RR_waldp_L{L}_PI{PI}_C{cluster_num}_eps{eps}_label_noise_{label_epsilon}_{model}_seed{seed}.png"
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            waldp_time(input_path, output_path, eps, PI, L,cluster_num,seed,label_epsilon,model)
+    for model in ["Yagishita","model2"]:
+        for PI, L,cluster_num,label_epsilon in params:
+            for eps in epsilons:        
+                input_path = f"../../data/{data}/CWALDP/fmnist_full_L{L}_PI{PI}.npz"
+                # 現在日時を取得し、YYYYMMDD-HHMMSS形式の文字列を生成
+                timestamp = datetime.datetime.now().strftime("%Y%m%d")
+                output_path = f"../../experiments/{data}/CWALDP/CNN/{timestamp}/RR_waldp_L{L}_PI{PI}_C{cluster_num}_eps{eps}_label_noise_{label_epsilon}_{model}_seed{seed}.png"
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                waldp_time(input_path, output_path, eps, PI, L,cluster_num,seed,label_epsilon,model)
