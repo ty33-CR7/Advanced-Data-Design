@@ -128,7 +128,7 @@ def create_L_domain(L):
 
 # Indicate which pixels belong to each cluster by adding the index to the list corresponding to each cluster.
 def create_cluster(P, cluster_num):
-    if P==cluster_num:
+    if cluster_num==P+1:#クラスターがクラスラベルを含むため、マイナス1する
         # each pixel is a cluster
         clusters = []
         for i in range(P):
