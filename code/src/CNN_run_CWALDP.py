@@ -128,7 +128,16 @@ def create_L_domain(L):
 
 # Indicate which pixels belong to each cluster by adding the index to the list corresponding to each cluster.
 def create_cluster(P, cluster_num):
-    if P == 196:
+    if P==cluster_num:
+        # each pixel is a cluster
+        clusters = []
+        for i in range(P):
+            clusters.append([i])
+        return clusters
+
+     # making clusters for CNN-based models
+
+    elif P == 196:
         # the number of clusters is 13 (12 + class label)
         if cluster_num == 13:
             # making clusters (ilustrated in PowerPoint p.19)
