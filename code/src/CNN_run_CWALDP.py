@@ -104,6 +104,147 @@ def grr_array(values, eps, domain, seed):
     out_idx = np.where(keep_mask, idx, repl)
     return domain[out_idx]
 
+import tensorflow as tf
+
+def get_model(model_name, input_shape):
+    # 全モデル共通の全結合層部分を定義しておくと、コピペミスが防げます
+    def common_dense_layers():
+        return [
+            tf.keras.layers.Flatten(),
+            tf.keras.layers.Dense(128),
+            tf.keras.layers.Activation('relu'),
+            tf.keras.layers.Dropout(0.25),
+            tf.keras.layers.Dense(64),
+            tf.keras.layers.Activation('relu'),
+            tf.keras.layers.Dropout(0.1),
+            tf.keras.layers.Dense(10, activation='softmax')
+        ]
+
+    if model_name == "model2":
+        # --- ベースライン (独自構成) ---
+        # Conv -> ReLU -> BN -> Dropout
+        model = tf.keras.models.Sequential([
+            # 第1ブロック
+            tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape),
+            tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+            tf.keras.layers.Dropout(0.5),
+            # 第2ブロック
+            tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
+            tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
+            tf.keras.layers.MaxPooling2D((2, 2)),
+            tf.keras.layers.Dropout(0.5),
+            *common_dense_layers() # 共通部分を展開
+        ])
+
+    elif model_name == "model1":
+        # --- 柳下さん (業界標準構成) ---
+        # Conv -> BN -> ReLU -> Pooling (Dropoutなし)
+        model = tf.keras.models.Sequential([
+            # 第1ブロック
+            tf.keras.layers.Conv2D(32, kernel_size=3, padding='same', input_shape=input_shape),
+            tf.keras.layers.BatchNormalization(),
+            tf.keras.layers.Activation('relu'),
+            tf.keras.layers.MaxPooling2D(pool_size=2, strides=2),
+            # 第2ブロック
+            tf.keras.layers.Conv2D(64, kernel_size=3, padding='same'),
+            tf.keras.layers.BatchNormalization(),
+            tf.keras.layers.Activation('relu'),
+            tf.keras.layers.MaxPooling2D(pool_size=2, strides=2),
+            *common_dense_layers()
+        ])
+
+    elif model_name == "model3":
+        # --- Model 2 改 (No Dropout) ---
+        # Conv層のDropoutを削除して、BNとの相性を見る
+        model = tf.keras.models.Sequential([
+            # 第1ブロック
+            tf.keras.layers.Conv2D(32, kernel_size=3, padding='same', input_shape=input_shape),
+            tf.keras.layers.Activation('relu'),
+            tf.keras.layers.BatchNormalization(),
+            # Dropoutなし
+            # 第2ブロック
+            tf.keras.layers.Conv2D(64, kernel_size=3, padding='same'),
+            tf.keras.layers.Activation('relu'),
+            tf.keras.layers.BatchNormalization(),
+            # Dropoutなし
+            tf.keras.layers.MaxPooling2D(pool_size=2, strides=2),
+            *common_dense_layers()
+        ])
+
+    elif model_name == "model4":
+        # --- Model 2 改 (Standard Order) ---
+        # BNと活性化関数の順序を標準(BN->ReLU)にする
+        model = tf.keras.models.Sequential([
+            # 第1ブロック
+            tf.keras.layers.Conv2D(32, kernel_size=3, padding='same', input_shape=input_shape),
+            tf.keras.layers.BatchNormalization(), # 先
+            tf.keras.layers.Activation('relu'),   # 後
+            tf.keras.layers.Dropout(0.25),
+            # 第2ブロック
+            tf.keras.layers.Conv2D(64, kernel_size=3, padding='same'),
+            tf.keras.layers.BatchNormalization(), # 先
+            tf.keras.layers.Activation('relu'),   # 後
+            tf.keras.layers.Dropout(0.25),
+            tf.keras.layers.MaxPooling2D(pool_size=2, strides=2),
+            *common_dense_layers()
+        ])
+
+    elif model_name == "model5": # ★ここ修正しました
+        # --- Model 2 改 (High Pooling) ---
+        # Poolingを柳下さんに合わせて増やし、パラメータ数を減らす
+        model = tf.keras.models.Sequential([
+            # 第1ブロック
+            tf.keras.layers.Conv2D(32, kernel_size=3, padding='same', input_shape=input_shape),
+            tf.keras.layers.Activation('relu'),
+            tf.keras.layers.BatchNormalization(),
+            tf.keras.layers.Dropout(0.25),
+            tf.keras.layers.MaxPooling2D(pool_size=2, strides=2), # 追加
+            # 第2ブロック
+            tf.keras.layers.Conv2D(64, kernel_size=3, padding='same'),
+            tf.keras.layers.Activation('relu'),
+            tf.keras.layers.BatchNormalization(),
+            tf.keras.layers.Dropout(0.25),
+            tf.keras.layers.MaxPooling2D(pool_size=2, strides=2),
+            *common_dense_layers()
+        ])
+    elif model_name == "model6":
+        # --- Model 6 (1層のみ) ---
+        # 入力が14x14なので、1回Poolingして7x7にするのがベストバランスと予想
+        model = tf.keras.models.Sequential([
+            # --- 第1畳み込み層ブロック ---
+            tf.keras.layers.Conv2D(32, kernel_size=3, padding='same', input_shape=(14, 14, 1)), # サイズ明示
+            tf.keras.layers.BatchNormalization(),
+            tf.keras.layers.Activation('relu'),
+            tf.keras.layers.Dropout(0.25),
+            
+            # 14x14 -> 7x7 にダウンサンプリング
+            tf.keras.layers.MaxPooling2D(pool_size=2, strides=2),
+
+            # --- 全結合層 (共通) ---
+            # ここで 7x7x32 のデータが平坦化されます
+            *common_dense_layers()
+        ])
+    elif model_name == "model7":
+        # --- Model 2 改 (Standard Order) ---
+        # BNと活性化関数の順序を標準(BN->ReLU)にする
+        model = tf.keras.models.Sequential([
+            # 第1ブロック
+            tf.keras.layers.Conv2D(32, kernel_size=3, padding='same', input_shape=input_shape),
+            tf.keras.layers.BatchNormalization(), # 先
+            tf.keras.layers.Activation('relu'),   # 後
+            # 第2ブロック
+            tf.keras.layers.Conv2D(64, kernel_size=3, padding='same'),
+            tf.keras.layers.BatchNormalization(), # 先
+            tf.keras.layers.Activation('relu'),   # 後
+            tf.keras.layers.MaxPooling2D(pool_size=2, strides=2),
+            *common_dense_layers()
+        ])
+            
+    else:
+        raise ValueError(f"Unknown model name: {model_name}")
+    
+    return model
+
 
   # ---- L 値のドメイン（GRRの候補値）----
     # たとえば WA で [0, 255] を L 分割して代表値に丸めている前提なら、
@@ -314,188 +455,7 @@ def train_model(X_train_noise,X_test_noise,X_test,y_train_noise_reshaped,y_train
 
         # 2. Conv2D層の入力形状 (バッチサイズを除く3次元)
         input_shape = (H, W, C)
-        # --------------------------
-        # 1D CNNモデルの定義
-        # --------------------------
-        if model_selection == "model2":
-            model = tf.keras.models.Sequential([
-                # ----------------------------------------
-                # 1. 第1畳み込みブロック
-                # ----------------------------------------
-                tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape),
-                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-                tf.keras.layers.Dropout(0.5),
-                
-                # ----------------------------------------
-                    # 2. 第2畳み込みブロック
-                # ----------------------------------------
-                tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
-                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-                tf.keras.layers.MaxPooling2D((2, 2)),
-                tf.keras.layers.Dropout(0.5),
-
-                # ----------------------------------------
-                # 3. 全結合層への準備
-                # ----------------------------------------
-                tf.keras.layers.Flatten(), # 2Dテンソルを1Dベクトルに変換
-
-                # ----------------------------------------
-                # 4. 第1全結合層 (Dense)
-                # ----------------------------------------
-                tf.keras.layers.Dense(100, activation='relu'),
-                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-                tf.keras.layers.Dropout(0.5),
-
-                # ----------------------------------------
-                # 5. 出力層 (Dense)
-                # ----------------------------------------
-                tf.keras.layers.Dense(10, activation='softmax') # クラス分類数が10と仮定
-            ])
-        elif model_selection=="model1":
-                model = tf.keras.models.Sequential([
-                # ----------------------------------------
-                # 1. 第1畳み込みブロック
-                # ----------------------------------------
-                tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape),
-                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-                tf.keras.layers.Dropout(0.5),
-                
-                # ----------------------------------------
-                    # 2. 第2畳み込みブロック
-                # ----------------------------------------
-                tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
-                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-                tf.keras.layers.Dropout(0.5),
-
-                # ----------------------------------------
-                # 3. 全結合層への準備
-                # ----------------------------------------
-                tf.keras.layers.Flatten(), # 2Dテンソルを1Dベクトルに変換
-
-                # ----------------------------------------
-                # 4. 第1全結合層 (Dense)
-                # ----------------------------------------
-                tf.keras.layers.Dense(100, activation='relu'),
-                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-                tf.keras.layers.Dropout(0.5),
-
-                # ----------------------------------------
-                # 5. 出力層 (Dense)
-                # ----------------------------------------
-                tf.keras.layers.Dense(10, activation='softmax') # クラス分類数が10と仮定
-            ])
-        elif model_selection=="model3":
-                model = tf.keras.models.Sequential([
-                # ----------------------------------------
-                # 1. 第1畳み込みブロック
-                # ----------------------------------------
-                tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape),
-                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-                tf.keras.layers.Dropout(0.5),
-            
-                # 3. 全結合層への準備
-                # ----------------------------------------
-                tf.keras.layers.Flatten(), # 2Dテンソルを1Dベクトルに変換
-
-                # ----------------------------------------
-                # 4. 第1全結合層 (Dense)
-                # ----------------------------------------
-                tf.keras.layers.Dense(100, activation='relu'),
-                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-                tf.keras.layers.Dropout(0.5),
-
-                # ----------------------------------------
-                # 5. 出力層 (Dense)
-                # ----------------------------------------
-                tf.keras.layers.Dense(10, activation='softmax') # クラス分類数が10と仮定
-            ])
-        elif   model_selection == "model4":
-                model = tf.keras.models.Sequential([
-                # ========================================
-                # 1. 第1畳み込みブロック
-                # ========================================
-                tf.keras.layers.Conv2D(32, (3, 3), padding="same",
-                                    activation='relu', input_shape=input_shape),
-                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-                tf.keras.layers.Conv2D(32, (3, 3), padding="same", activation='relu'),
-                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-                tf.keras.layers.MaxPooling2D((2, 2)),
-                tf.keras.layers.Dropout(0.3),
-
-                # ========================================
-                # 2. 第2畳み込みブロック
-                # ========================================
-                tf.keras.layers.Conv2D(64, (3, 3), padding="same", activation='relu'),
-                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-                tf.keras.layers.Conv2D(64, (3, 3), padding="same", activation='relu'),
-                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-                tf.keras.layers.MaxPooling2D((2, 2)),
-                tf.keras.layers.Dropout(0.4),
-
-                # ========================================
-                # 3. 第3畳み込みブロック
-                # ========================================
-                tf.keras.layers.Conv2D(128, (3, 3), padding="same", activation='relu'),
-                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-                tf.keras.layers.Conv2D(128, (3, 3), padding="same", activation='relu'),
-                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-                tf.keras.layers.MaxPooling2D((2, 2)),
-                tf.keras.layers.Dropout(0.5),
-
-                # ========================================
-                # 4. 全結合層への準備
-                # ========================================
-                tf.keras.layers.Flatten(),
-
-                # ========================================
-                # 5. 全結合層
-                # ========================================
-                tf.keras.layers.Dense(256, activation='relu'),
-                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-                tf.keras.layers.Dropout(0.5),
-
-                tf.keras.layers.Dense(100, activation='relu'),
-                tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=0.001),
-                tf.keras.layers.Dropout(0.5),
-
-                # ========================================
-                # 6. 出力層
-                # ========================================
-                tf.keras.layers.Dense(10, activation='softmax')
-            ])
-        elif model_selection=="Yagishita":
-            model = tf.keras.models.Sequential([
-                    # --- 第1畳み込み層ブロック ---
-                    tf.keras.layers.Conv2D(16, kernel_size=3, padding='same', input_shape=input_shape),
-                    tf.keras.layers.BatchNormalization(),
-                    tf.keras.layers.Activation('relu'),
-                    tf.keras.layers.MaxPooling2D(pool_size=2, strides=2),
-
-                    # --- 第2畳み込み層ブロック ---
-                    tf.keras.layers.Conv2D(32, kernel_size=3, padding='same'),
-                    tf.keras.layers.BatchNormalization(),
-                    tf.keras.layers.Activation('relu'),
-                    tf.keras.layers.MaxPooling2D(pool_size=2, strides=2),
-
-                    # 全結合層へ渡すための平坦化
-                    tf.keras.layers.Flatten(),
-
-                    # --- 全結合層 1 ---
-                    # 画像内の 'n' は、Flatten後のユニット数に自動的に対応します
-                    tf.keras.layers.Dense(128),
-                    tf.keras.layers.Activation('relu'),
-                    tf.keras.layers.Dropout(0.25),
-
-                    # --- 全結合層 2 ---
-                    tf.keras.layers.Dense(64),
-                    tf.keras.layers.Activation('relu'),
-                    tf.keras.layers.Dropout(0.1),
-
-                    # --- 全結合層 3 (出力層) ---
-                    tf.keras.layers.Dense(10, activation='softmax') # 10クラス分類を想定
-                ])
-
-
+        model=get_model(model_selection, input_shape)
         #tf.keras.layers.MaxPooling2D((2, 2)),
 
         # --------------------------
@@ -765,12 +725,11 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
 
 if __name__ == "__main__":
     data="FashionMNIST"
-    seeds = [1]
-    epsilons=[0]
+    seeds = [1,2,3]
+    epsilons=[0.5,0.75,1,1.25,1.5]
     #(14*14,4,10,0),(14*14,4,13,0)(14*14,2,10,2),(14*14,2,13,2),(14*14,2,10,0),(14*14,2,13,0),(14*14,4,10,2),(14*14,4,13,2),
-    params = [(0.5,4,10,0)]
-    model="Yagishita"
-    for model in ["Yagishita","model2"]:
+    params = [(0.5,4,10,0),(0.5,4,10,0),(0.5,4,14*14+1)]
+    for model in ["model4"]:
         for eps in epsilons:  
             for unique_dataset in [False]:
                 for PI, L,cluster_num,label_epsilon in params:
