@@ -212,7 +212,7 @@ def get_model(model_name, input_shape):
         # 入力が14x14なので、1回Poolingして7x7にするのがベストバランスと予想
         model = tf.keras.models.Sequential([
             # --- 第1畳み込み層ブロック ---
-            tf.keras.layers.Conv2D(32, kernel_size=3, padding='same', input_shape=(14, 14, 1)), # サイズ明示
+            tf.keras.layers.Conv2D(32, kernel_size=3, padding='same', input_shape=input_shape), # サイズ明示
             tf.keras.layers.BatchNormalization(),
             tf.keras.layers.Activation('relu'),
             tf.keras.layers.Dropout(0.25),
@@ -724,24 +724,28 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
 
 
 if __name__ == "__main__":
-    data="FashionMNIST"
-    seeds = [1,2,3]
-    epsilons=[0.5,0.75,1,1.25,1.5]
+    data="MNIST"
+    seeds = [1]
+    epsilons=[0]
     #(14*14,4,10,0),(14*14,4,13,0)(14*14,2,10,2),(14*14,2,13,2),(14*14,2,10,0),(14*14,2,13,0),(14*14,4,10,2),(14*14,4,13,2),
-    params = [(0.5,4,10,0),(0.5,4,10,0),(0.5,4,14*14+1)]
-    for model in ["model4"]:
-        for eps in epsilons:  
-            for unique_dataset in [False]:
-                for PI, L,cluster_num,label_epsilon in params:
-                        if data=="FashionMNIST":
-                            if unique_dataset:
-                                IDX_DIR = os.path.join("../../", f"data/{data}/CWALDP/unique_img/fmnist_full_L{L}_PI{PI}")
-                                input_path = f"../../data/{data}/CWALDP/unique_img/fmnist_full_L{L}_PI{PI}/cleaned_fmnist_L{L}_PI{PI}.npz"
-                            else:
-                                IDX_DIR = os.path.join("../../", f"split_indices_full_gray/{data}")     
-                                input_path = f"../../data/{data}/CWALDP/fmnist_full_L{L}_PI{PI}.npz"
-                            # 現在日時を取得し、YYYYMMDD-HHMMSS形式の文字列を生成
+    params = [(0.5,4,13,0)]#(0.5,4,14*14+1,0)
+    for data in ["MNIST"]:
+        for model in ["model4"]:
+            for eps in epsilons:  
+                for unique_dataset in [False]:
+                    for PI, L,cluster_num,label_epsilon in params:
+                            if data=="FashionMNIST":
+                                if unique_dataset:
+                                    IDX_DIR = os.path.join("../../", f"data/{data}/CWALDP/unique_img/fmnist_full_L{L}_PI{PI}")
+                                    input_path = f"../../data/{data}/CWALDP/unique_img/fmnist_full_L{L}_PI{PI}/cleaned_fmnist_L{L}_PI{PI}.npz"
+                                else:
+                                    IDX_DIR = os.path.join("../../", f"split_indices_full_gray/{data}")     
+                                    input_path = f"../../data/{data}/CWALDP/fmnist_full_L{L}_PI{PI}.npz"
+
+                            elif data == "MNIST":
+                                IDX_DIR = os.path.join("../../", f"split_indices_full_gray/{data}")  
+                                input_path = f"../../data/{data}/CWALDP/mnist_full_L{L}_PI{PI}.npz"
+                                                        # 現在日時を取得し、YYYYMMDD-HHMMSS形式の文字列を生成
                             timestamp = datetime.datetime.now().strftime("%Y%m%d")
                             output_path = f"../../experiments/{data}/CWALDP/CNN/{timestamp}/CWALDP_L{L}_PI{PI}_C{cluster_num}_eps{eps}_label_noise_{label_epsilon}_{model}.csv"
-                        
                             waldp_time(input_path, output_path, eps, PI, L,cluster_num, seeds,label_epsilon,data,model,IDX_DIR)

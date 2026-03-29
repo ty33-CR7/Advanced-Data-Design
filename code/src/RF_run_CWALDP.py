@@ -219,11 +219,11 @@ def waldp_time(original_path, output_path, epsilon_per_pixel, PI, L,cluster_num,
 
 
 if __name__ == "__main__":
-    data="FashionMNIST"
-    seeds = [1,2,3]
-    epsilons=[0.5,1.5]
+    data="MNIST"
+    seeds = [1]
+    epsilons=[0]
     #(14*14,4,10,0),(14*14,4,13,0)(14*14,2,10,2),(14*14,2,13,2),(14*14,2,10,0),(14*14,2,13,0),(14*14,4,10,2),(14*14,4,13,2),
-    params = [(0.5,4,10,2),(0.5,4,13,2)]
+    params = [(0.5,4,13,0)]
     for eps in epsilons:  
         for unique_dataset in [False]:
             for PI, L,cluster_num,label_epsilon in params:
@@ -234,8 +234,11 @@ if __name__ == "__main__":
                         else:
                             IDX_DIR = os.path.join("../../", f"split_indices_full_gray/{data}")     
                             input_path = f"../../data/{data}/CWALDP/fmnist_full_L{L}_PI{PI}.npz"
-                        # 現在日時を取得し、YYYYMMDD-HHMMSS形式の文字列を生成
-                        timestamp = datetime.datetime.now().strftime("%Y%m%d")
-                        output_path = f"../../experiments/{data}/CWALDP/RF/{timestamp}/CWALDP_L{L}_PI{PI}_C{cluster_num}_eps{eps}_label_noise_{label_epsilon}.csv"
-                    
-                        waldp_time(input_path, output_path, eps, PI, L,cluster_num, seeds,label_epsilon,IDX_DIR)
+
+                    elif data == "MNIST":
+                        IDX_DIR = os.path.join("../../", f"split_indices_full_gray/{data}")  
+                        input_path = f"../../data/{data}/CWALDP/mnist_full_L{L}_PI{PI}.npz"
+                                            # 現在日時を取得し、YYYYMMDD-HHMMSS形式の文字列を生成
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d")
+                    output_path = f"../../experiments/{data}/CWALDP/RF/{timestamp}/CWALDP_L{L}_PI{PI}_C{cluster_num}_eps{eps}_label_noise_{label_epsilon}.csv"
+                    waldp_time(input_path, output_path, eps, PI, L,cluster_num, seeds,label_epsilon,IDX_DIR)
