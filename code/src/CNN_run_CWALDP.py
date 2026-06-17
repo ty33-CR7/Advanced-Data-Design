@@ -261,6 +261,8 @@ def create_L_domain(L):
         return list(range(16, 256, 32))
     elif L == 4:
         return list(range(32, 256, 64))
+    elif L == 3:
+        return [42, 127, 212]
     elif L == 2:
         return list(range(64, 256, 128))
     else:
